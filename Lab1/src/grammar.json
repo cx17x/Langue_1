@@ -1,0 +1,250 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "v2lang_test",
+  "rules": {
+    "source_file": {
+      "type": "REPEAT",
+      "content": {
+        "type": "SYMBOL",
+        "name": "sourceItem"
+      }
+    },
+    "comment": {
+      "type": "TOKEN",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "//"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[^\\n]*"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "{"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[^}]*"
+              },
+              {
+                "type": "STRING",
+                "value": "}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "sourceItem": {
+      "type": "SYMBOL",
+      "name": "funcDef"
+    },
+    "funcDef": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "method"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "block"
+        }
+      ]
+    },
+    "block": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "begin"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "statement"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "end"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "statement": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "assignment"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expr_stmt"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "block"
+        }
+      ]
+    },
+    "assignment": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "STRING",
+          "value": ":="
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expr"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "expr_stmt": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "expr"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "expr": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        }
+      ]
+    },
+    "identifier": {
+      "type": "PATTERN",
+      "value": "[a-zA-Z_][a-zA-Z_0-9]*"
+    },
+    "str": {
+      "type": "PATTERN",
+      "value": "\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\""
+    },
+    "char": {
+      "type": "PATTERN",
+      "value": "'[^']'"
+    },
+    "hex": {
+      "type": "PATTERN",
+      "value": "0[xX][0-9A-Fa-f]+"
+    },
+    "bits": {
+      "type": "PATTERN",
+      "value": "0[bB][01]+"
+    },
+    "dec": {
+      "type": "PATTERN",
+      "value": "[0-9]+"
+    },
+    "bool": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "true"
+        },
+        {
+          "type": "STRING",
+          "value": "false"
+        }
+      ]
+    },
+    "literal": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "bool"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "str"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "char"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "hex"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "bits"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "dec"
+        }
+      ]
+    }
+  },
+  "extras": [
+    {
+      "type": "PATTERN",
+      "value": "\\s"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "comment"
+    }
+  ],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}

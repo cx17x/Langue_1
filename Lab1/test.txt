@@ -1,0 +1,6 @@
+method foo()
+begin
+  x := 42;
+  y := "hello";
+  z := 0x1F;
+end;
