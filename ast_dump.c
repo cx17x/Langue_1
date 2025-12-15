@@ -41,26 +41,75 @@ static void print_label_escaped(FILE *out, const char *s) {
 }
 
 // рекурсивный обход AST и генерация узлов/рёбер
-static void dump_node_dot(FILE *out, TSNode node, int parent_id, int *next_id) {
+static void dump_node_dot(FILE *out, TSNode node, int parent_id, int *next_id, const char *source) {
     int my_id = (*next_id)++;
 
     const char *type = ts_node_type(node);
 
     // вывод вершины
     fprintf(out, "  n%d [label=", my_id);
-    print_label_escaped(out, type);
-    fprintf(out, "];\n");
+    // если узел — лист, добавляем текст токена для выбранных типов: short: text
+    uint32_t child_count = ts_node_child_count(node);
+    if (child_count == 0) {
+        uint32_t start = ts_node_start_byte(node);
+        uint32_t end = ts_node_end_byte(node);
+        size_t len = (end > start) ? (end - start) : 0;
+        // буфер для текста токена (ограничим разумно)
+        size_t buf_len = len + 1 + 32;
+        char *buf = (char*)malloc(buf_len);
+        if (buf) {
+            if (len > 0) memcpy(buf, source + start, len);
+            buf[len] = '\0';
+            // показываем текст только для некоторых типов и сокращаем имя
+            const char *short_name = NULL;
+            if (strcmp(type, "identifier") == 0) short_name = "id";
+            else if (strcmp(type, "dec") == 0) short_name = "num";
+            else if (strcmp(type, "hex") == 0) short_name = "hex";
+            else if (strcmp(type, "bits") == 0) short_name = "bits";
+            else if (strcmp(type, "str") == 0) short_name = "str";
+            else if (strcmp(type, "char") == 0) short_name = "char";
+            else if (strcmp(type, "bool") == 0) short_name = "bool";
 
+            if (short_name) {
+                size_t label_len = strlen(short_name) + 2 + len + 1;
+                char *label = (char*)malloc(label_len);
+                if (label) {
+                    sprintf(label, "%s: %s", short_name, buf);
+                    print_label_escaped(out, label);
+                    free(label);
+                } else {
+                    print_label_escaped(out, short_name);
+                }
+            } else {
+                print_label_escaped(out, type);
+            }
+            free(buf);
+        } else {
+            print_label_escaped(out, type);
+        }
+    } else {
+        print_label_escaped(out, type);
+    }
+    /* highlight certain node types for clarity */
+    if (strcmp(type, "assignment") == 0) {
+        fprintf(out, ", style=filled, fillcolor=lightblue, shape=box");
+    } else if (strcmp(type, "if_statement") == 0) {
+        fprintf(out, ", style=filled, fillcolor=lightgreen, shape=box");
+    } else if (strcmp(type, "funcDef") == 0) {
+        fprintf(out, ", style=filled, fillcolor=lightgrey, shape=ellipse");
+    } else if (strcmp(type, "varDecl") == 0) {
+        fprintf(out, ", style=filled, fillcolor=khaki, shape=box");
+    }
+    fprintf(out, "];\n");
     // если есть родитель — вывод ребра parent -> this
     if (parent_id >= 0) {
         fprintf(out, "  n%d -> n%d;\n", parent_id, my_id);
     }
 
     // обходим детей
-    uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
         TSNode child = ts_node_child(node, i);
-        dump_node_dot(out, child, my_id, next_id);
+        dump_node_dot(out, child, my_id, next_id, source);
     }
 }
 
@@ -106,7 +155,7 @@ int main(int argc, char **argv) {
     fprintf(out, "digraph AST {\n");
     int next_id = 0;
     TSNode root = ts_tree_root_node(tree);
-    dump_node_dot(out, root, -1, &next_id);
+    dump_node_dot(out, root, -1, &next_id, source);
     fprintf(out, "}\n");
 
     fclose(out);

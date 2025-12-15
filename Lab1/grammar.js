@@ -43,7 +43,7 @@ module.exports = grammar({
     funcDef: $ => seq('method', $.funcSignature, choice($.body, ';')),
 
     body: $ => seq(
-      optional(seq('var', repeat($.varDecl))),
+      repeat(seq('var', repeat($.varDecl))),
       $.block
     ),
 
@@ -58,7 +58,7 @@ module.exports = grammar({
       $.while_statement,
       $.do_statement,
       $.break_statement,
-      $.varDecl,
+      $.assignment,
       $.expr_stmt
     ),
 
@@ -74,16 +74,32 @@ module.exports = grammar({
 
     expr_stmt: $ => seq($.expr, ';'),
 
-    // ---- Expressions ----
-    expr: $ => choice(
-      $.assign_expr,
-      $.binary_expr,
-      $.unary_expr,
-      $.postfix
+    // ---- Expressions with precedence ----
+    expr: $ => $._expr,
+
+    _expr: $ => choice(
+      $.logical_or
     ),
 
-    // assignment: place ':=' expr  (place can be identifier or indexed/postfix)
-    assign_expr: $ => prec.right(1, seq($.postfix, ':=', $.expr)),
+    logical_or: $ => prec.left(seq($.logical_and, repeat(seq(choice('||', 'or'), $.logical_and)))),
+    logical_and: $ => prec.left(seq($.bitwise_or, repeat(seq(choice('&&', 'and'), $.bitwise_or)))),
+
+    bitwise_or: $ => prec.left(seq($.bitwise_xor, repeat(seq('|', $.bitwise_xor)))),
+    bitwise_xor: $ => prec.left(seq($.bitwise_and, repeat(seq('^', $.bitwise_and)))),
+    bitwise_and: $ => prec.left(seq($.equality, repeat(seq('&', $.equality)))),
+
+    equality: $ => prec.left(seq($.relational, repeat(seq(choice('=', '!='), $.relational)))),
+    relational: $ => prec.left(seq($.shift, repeat(seq(choice('<', '>', '<=', '>='), $.shift)))),
+
+    shift: $ => prec.left(seq($.add, repeat(seq(choice('<<', '>>'), $.add)))),
+
+    add: $ => prec.left(seq($.mul, repeat(seq(choice('+', '-'), $.mul)))),
+    mul: $ => prec.left(seq($.unary, repeat(seq(choice('*', '/', '%'), $.unary)))),
+
+    unary: $ => choice(seq(choice('-', '!', 'not', '~'), $.unary), $.postfix),
+
+    // assignment is a statement (not an expression): postfix ':=' expr ';'
+    assignment: $ => prec.right(seq($.postfix, ':=', $.expr, ';')),
 
     // primary expressions: literals, identifiers, parenthesis
     primary: $ => choice($.literal, $.identifier, seq('(', $.expr, ')')),
@@ -96,13 +112,6 @@ module.exports = grammar({
     ),
 
     exprList: $ => seq($.expr, repeat(seq(',', $.expr))),
-
-    binary_expr: $ => prec.left(2, seq($.expr, $.binOp, $.expr)),
-
-    unary_expr: $ => seq($.unOp, $.postfix),
-
-    binOp: _ => token(choice('+', '-', '*', '/', '%', '<=', '>=', '<', '>', '=', '!=', 'and', 'or')),
-    unOp: _ => token(choice('-', '!', 'not')),
 
     // ---- Лексемы ----
     identifier: _ => /[a-zA-Z_][a-zA-Z_0-9]*/,             // идентификатор

@@ -1,5 +1,20 @@
 [
   {
+    "type": "add",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "mul",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "argDef",
     "named": true,
     "fields": {},
@@ -34,7 +49,7 @@
     }
   },
   {
-    "type": "assign_expr",
+    "type": "assignment",
     "named": true,
     "fields": {},
     "children": {
@@ -53,7 +68,7 @@
     }
   },
   {
-    "type": "binary_expr",
+    "type": "bitwise_and",
     "named": true,
     "fields": {},
     "children": {
@@ -61,11 +76,37 @@
       "required": true,
       "types": [
         {
-          "type": "binOp",
+          "type": "equality",
           "named": true
-        },
+        }
+      ]
+    }
+  },
+  {
+    "type": "bitwise_or",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
         {
-          "type": "expr",
+          "type": "bitwise_xor",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "bitwise_xor",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "bitwise_and",
           "named": true
         }
       ]
@@ -135,6 +176,21 @@
     }
   },
   {
+    "type": "equality",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "relational",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "expr",
     "named": true,
     "fields": {},
@@ -143,19 +199,7 @@
       "required": true,
       "types": [
         {
-          "type": "assign_expr",
-          "named": true
-        },
-        {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
-          "type": "postfix",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
+          "type": "logical_or",
           "named": true
         }
       ]
@@ -303,6 +347,51 @@
     }
   },
   {
+    "type": "logical_and",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "bitwise_or",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "logical_or",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "logical_and",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "mul",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "unary",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "postfix",
     "named": true,
     "fields": {},
@@ -349,6 +438,36 @@
     }
   },
   {
+    "type": "relational",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "shift",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "shift",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "add",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "sourceItem",
     "named": true,
     "fields": {},
@@ -388,6 +507,10 @@
       "required": true,
       "types": [
         {
+          "type": "assignment",
+          "named": true
+        },
+        {
           "type": "block",
           "named": true
         },
@@ -405,10 +528,6 @@
         },
         {
           "type": "if_statement",
-          "named": true
-        },
-        {
-          "type": "varDecl",
           "named": true
         },
         {
@@ -438,11 +557,11 @@
     }
   },
   {
-    "type": "unary_expr",
+    "type": "unary",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
@@ -450,7 +569,7 @@
           "named": true
         },
         {
-          "type": "unOp",
+          "type": "unary",
           "named": true
         }
       ]
@@ -495,6 +614,26 @@
     }
   },
   {
+    "type": "!",
+    "named": false
+  },
+  {
+    "type": "!=",
+    "named": false
+  },
+  {
+    "type": "%",
+    "named": false
+  },
+  {
+    "type": "&",
+    "named": false
+  },
+  {
+    "type": "&&",
+    "named": false
+  },
+  {
     "type": "(",
     "named": false
   },
@@ -503,7 +642,23 @@
     "named": false
   },
   {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
+    "named": false
+  },
+  {
     "type": ",",
+    "named": false
+  },
+  {
+    "type": "-",
+    "named": false
+  },
+  {
+    "type": "/",
     "named": false
   },
   {
@@ -519,11 +674,47 @@
     "named": false
   },
   {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "<<",
+    "named": false
+  },
+  {
+    "type": "<=",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": ">=",
+    "named": false
+  },
+  {
+    "type": ">>",
+    "named": false
+  },
+  {
     "type": "[",
     "named": false
   },
   {
     "type": "]",
+    "named": false
+  },
+  {
+    "type": "^",
+    "named": false
+  },
+  {
+    "type": "and",
     "named": false
   },
   {
@@ -533,10 +724,6 @@
   {
     "type": "begin",
     "named": false
-  },
-  {
-    "type": "binOp",
-    "named": true
   },
   {
     "type": "bits",
@@ -612,7 +799,15 @@
     "named": false
   },
   {
+    "type": "not",
+    "named": false
+  },
+  {
     "type": "of",
+    "named": false
+  },
+  {
+    "type": "or",
     "named": false
   },
   {
@@ -644,10 +839,6 @@
     "named": false
   },
   {
-    "type": "unOp",
-    "named": true
-  },
-  {
     "type": "until",
     "named": false
   },
@@ -657,6 +848,18 @@
   },
   {
     "type": "while",
+    "named": false
+  },
+  {
+    "type": "|",
+    "named": false
+  },
+  {
+    "type": "||",
+    "named": false
+  },
+  {
+    "type": "~",
     "named": false
   }
 ]
