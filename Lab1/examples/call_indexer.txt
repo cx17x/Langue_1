@@ -1,0 +1,5 @@
+method test()
+begin
+  arr[0] := f(1,2)[i];
+  x := -a + b * (c + d);
+end;

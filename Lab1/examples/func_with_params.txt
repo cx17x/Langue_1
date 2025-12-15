@@ -1,0 +1,6 @@
+method add(a:int, b:int): int
+  var x, y: int;
+begin
+  x := a + b;
+  y := x * 2;
+end;

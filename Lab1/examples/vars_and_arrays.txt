@@ -1,0 +1,7 @@
+method init()
+  var a, b: int;
+  var arr: array[,,] of int;
+begin
+  a := 1;
+  b := 2;
+end;
