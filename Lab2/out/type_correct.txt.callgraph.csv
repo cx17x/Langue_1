@@ -1,0 +1,4 @@
+caller,callee,count
+test_call_long,add_longs,1
+test_call_uint,add_uints,1
+test_call_int,add_ints,1

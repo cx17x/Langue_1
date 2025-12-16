@@ -1,0 +1,24 @@
+digraph CallGraph {
+  "test_bitwise_with_bool";
+  "test_logical_with_int";
+  "test_array_wrong_index_type";
+  "test_array_wrong_element_type";
+  "test_call_uint_with_int";
+  "test_call_mixed_types";
+  "test_call_missing_args";
+  "test_call_wrong_arg_count";
+  "test_call_wrong_arg_type";
+  "helper_two_args";
+  "helper_uint";
+  "helper_int";
+  "test_comparison_type_mismatch";
+  "test_byte_int_conflict";
+  "test_uint_ulong_conflict";
+  "test_int_long_conflict";
+  "test_int_uint_conflict";
+  "test_call_uint_with_int" -> "helper_uint";
+  "test_call_mixed_types" -> "helper_two_args";
+  "test_call_missing_args" -> "helper_int";
+  "test_call_wrong_arg_count" -> "helper_int";
+  "test_call_wrong_arg_type" -> "helper_int";
+}

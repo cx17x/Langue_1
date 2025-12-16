@@ -1,0 +1,6 @@
+caller,callee
+test_call_uint_with_int,helper_uint
+test_call_mixed_types,helper_two_args
+test_call_missing_args,helper_int
+test_call_wrong_arg_count,helper_int
+test_call_wrong_arg_type,helper_int

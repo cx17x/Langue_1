@@ -1,0 +1,104 @@
+digraph G {
+  subgraph cluster_f0 {
+    label="function test_bitwise_with_bool";
+    file_type_errors_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f0_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: BinaryOp(BitwiseExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: UnaryOp(~) { Nop(Identifier) [var:a] }"];
+    file_type_errors_txt_f0_n1 -> file_type_errors_txt_f0_n0;
+  }
+  subgraph cluster_f1 {
+    label="function test_logical_with_int";
+    file_type_errors_txt_f1_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f1_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: BinaryOp(LogicExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: UnaryOp(!) { Nop(Identifier) [var:a] }"];
+    file_type_errors_txt_f1_n1 -> file_type_errors_txt_f1_n0;
+  }
+  subgraph cluster_f2 {
+    label="function test_array_wrong_index_type";
+    file_type_errors_txt_f2_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f2_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:val]\n  rhs: BinaryOp(IndexExpr) { Nop(Identifier) [var:arr] | Nop(Identifier) [var:idx] }"];
+    file_type_errors_txt_f2_n1 -> file_type_errors_txt_f2_n0;
+  }
+  subgraph cluster_f3 {
+    label="function test_array_wrong_element_type";
+    file_type_errors_txt_f3_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f3_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: BinaryOp(IndexExpr) { Nop(Identifier) [var:arr] | Nop(Identifier) [var:idx] }\n  rhs: Nop(Identifier) [var:val]"];
+    file_type_errors_txt_f3_n1 -> file_type_errors_txt_f3_n0;
+  }
+  subgraph cluster_f4 {
+    label="function test_call_uint_with_int";
+    file_type_errors_txt_f4_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f4_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:res]\n  rhs: Call(helper_uint) { Nop(Identifier) [var:a] }"];
+    file_type_errors_txt_f4_n1 -> file_type_errors_txt_f4_n0;
+  }
+  subgraph cluster_f5 {
+    label="function test_call_mixed_types";
+    file_type_errors_txt_f5_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f5_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:res]\n  rhs: Call(helper_two_args) { Nop(Identifier) [var:b] | Nop(Identifier) [var:a] }"];
+    file_type_errors_txt_f5_n1 -> file_type_errors_txt_f5_n0;
+  }
+  subgraph cluster_f6 {
+    label="function test_call_missing_args";
+    file_type_errors_txt_f6_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f6_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:res]\n  rhs: Call(helper_int) { Nop(Identifier) [var:a] }"];
+    file_type_errors_txt_f6_n1 -> file_type_errors_txt_f6_n0;
+  }
+  subgraph cluster_f7 {
+    label="function test_call_wrong_arg_count";
+    file_type_errors_txt_f7_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f7_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:res]\n  rhs: Call(helper_int) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] | Nop(Identifier) [var:c] }"];
+    file_type_errors_txt_f7_n1 -> file_type_errors_txt_f7_n0;
+  }
+  subgraph cluster_f8 {
+    label="function test_call_wrong_arg_type";
+    file_type_errors_txt_f8_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f8_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:res]\n  rhs: Call(helper_int) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f8_n1 -> file_type_errors_txt_f8_n0;
+  }
+  subgraph cluster_f9 {
+    label="function helper_two_args";
+    file_type_errors_txt_f9_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f9_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:r]\n  rhs: Nop(Identifier) [var:a]"];
+    file_type_errors_txt_f9_n1 -> file_type_errors_txt_f9_n0;
+  }
+  subgraph cluster_f10 {
+    label="function helper_uint";
+    file_type_errors_txt_f10_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f10_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:r]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:x] | Nop(Literal) [const:1] }"];
+    file_type_errors_txt_f10_n1 -> file_type_errors_txt_f10_n0;
+  }
+  subgraph cluster_f11 {
+    label="function helper_int";
+    file_type_errors_txt_f11_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f11_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:r]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:x] | Nop(Identifier) [var:y] }"];
+    file_type_errors_txt_f11_n1 -> file_type_errors_txt_f11_n0;
+  }
+  subgraph cluster_f12 {
+    label="function test_comparison_type_mismatch";
+    file_type_errors_txt_f12_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f12_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: BinaryOp(CompareExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }\nAssign(=)\n  lhs: Nop(Identifier) [var:c]\n  rhs: BinaryOp(CompareExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f12_n1 -> file_type_errors_txt_f12_n0;
+  }
+  subgraph cluster_f13 {
+    label="function test_byte_int_conflict";
+    file_type_errors_txt_f13_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f13_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Identifier) [var:b]\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f13_n1 -> file_type_errors_txt_f13_n0;
+  }
+  subgraph cluster_f14 {
+    label="function test_uint_ulong_conflict";
+    file_type_errors_txt_f14_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f14_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Identifier) [var:b]\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: BinaryOp(MulExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f14_n1 -> file_type_errors_txt_f14_n0;
+  }
+  subgraph cluster_f15 {
+    label="function test_int_long_conflict";
+    file_type_errors_txt_f15_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f15_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Identifier) [var:b]\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f15_n1 -> file_type_errors_txt_f15_n0;
+  }
+  subgraph cluster_f16 {
+    label="function test_int_uint_conflict";
+    file_type_errors_txt_f16_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_type_errors_txt_f16_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Identifier) [var:b]\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }"];
+    file_type_errors_txt_f16_n1 -> file_type_errors_txt_f16_n0;
+  }
+}

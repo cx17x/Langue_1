@@ -1,0 +1,6 @@
+digraph CallGraph {
+  "hello_world_2";
+  "c";
+  "hello_world_3";
+  "hello_world_2" -> "c" [label="1"];
+}

@@ -1,0 +1,26 @@
+digraph G {
+  subgraph cluster_f0 {
+    label="function hello_world_2";
+    file_functions_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_functions_txt_f0_n1 [shape=box,label="B1 (entry)\nExprStmt\n  expr: Call(c) { }\nExprStmt\n  expr: Call(g) { }"];
+    file_functions_txt_f0_n1 -> file_functions_txt_f0_n0;
+  }
+  subgraph cluster_f1 {
+    label="function c";
+    file_functions_txt_f1_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_functions_txt_f1_n1 [shape=box,label="B1 (entry)\nempty"];
+    file_functions_txt_f1_n1 -> file_functions_txt_f1_n0;
+  }
+  subgraph cluster_f2 {
+    label="function hello_world_3";
+    file_functions_txt_f2_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_functions_txt_f2_n1 [shape=box,label="B1 (entry)\nempty"];
+    file_functions_txt_f2_n1 -> file_functions_txt_f2_n0;
+  }
+  subgraph cluster_f3 {
+    label="function hello_world_2";
+    file_functions_txt_f3_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_functions_txt_f3_n1 [shape=box,label="B1 (entry)\nempty"];
+    file_functions_txt_f3_n1 -> file_functions_txt_f3_n0;
+  }
+}
