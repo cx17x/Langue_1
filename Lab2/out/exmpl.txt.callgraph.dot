@@ -1,0 +1,9 @@
+digraph CallGraph {
+  "main";
+  "z";
+  "y";
+  "x";
+  "main" -> "x" [label="1"];
+  "main" -> "y" [label="1"];
+  "main" -> "z" [label="1"];
+}

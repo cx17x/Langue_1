@@ -2,10 +2,71 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <tree_sitter/api.h>
 
 // объявление функции языка (из grammar.js → name: 'v2lang_test')
 const TSLanguage *tree_sitter_v2lang_test(void);
+
+typedef struct {
+    char **types;
+    int count;
+} TypeFilter;
+
+static void tf_init(TypeFilter *f) {
+    f->types = NULL;
+    f->count = 0;
+}
+
+static void tf_free(TypeFilter *f) {
+    if (!f) return;
+    for (int i=0;i<f->count;i++) free(f->types[i]);
+    free(f->types);
+    f->types = NULL;
+    f->count = 0;
+}
+
+static int tf_contains(const TypeFilter *f, const char *type) {
+    if (!f || f->count == 0 || !type) return 1;
+    for (int i=0;i<f->count;i++) {
+        if (strcmp(f->types[i], type) == 0) return 1;
+    }
+    return 0;
+}
+
+static void tf_add(TypeFilter *f, const char *type) {
+    if (!type || !*type) return;
+    if (tf_contains(f, type)) return;
+    if (f->count + 1 > 1024) return;
+    char **tmp = realloc(f->types, sizeof(char*) * (f->count + 1));
+    if (!tmp) return;
+    f->types = tmp;
+    f->types[f->count++] = strdup(type);
+}
+
+static char *trim(char *s) {
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s == '\0') return s;
+    char *end = s + strlen(s) - 1;
+    while (end > s && isspace((unsigned char)*end)) {
+        *end = '\0';
+        end--;
+    }
+    return s;
+}
+
+static void tf_parse(TypeFilter *f, const char *arg) {
+    if (!arg || !*arg) return;
+    char *dup = strdup(arg);
+    if (!dup) return;
+    char *token = strtok(dup, ",");
+    while (token) {
+        char *clean = trim(token);
+        if (*clean) tf_add(f, clean);
+        token = strtok(NULL, ",");
+    }
+    free(dup);
+}
 
 // читает весь файл в память
 static char* read_file(const char *path, size_t *out_len) {
@@ -40,91 +101,121 @@ static void print_label_escaped(FILE *out, const char *s) {
     fputc('"', out);
 }
 
-// рекурсивный обход AST и генерация узлов/рёбер
-static void dump_node_dot(FILE *out, TSNode node, int parent_id, int *next_id, const char *source) {
-    int my_id = (*next_id)++;
+static int is_wrapper_type(const char *type);
+static int is_trivial_wrapper(TSNode node);
 
+// рекурсивный обход AST и генерация узлов/рёбер
+static void dump_node_dot(FILE *out, TSNode node, int parent_printed_id, int *next_id, const char *source, const TypeFilter *filter) {
     const char *type = ts_node_type(node);
 
-    // вывод вершины
-    fprintf(out, "  n%d [label=", my_id);
-    // если узел — лист, добавляем текст токена для выбранных типов: short: text
-    uint32_t child_count = ts_node_child_count(node);
-    if (child_count == 0) {
-        uint32_t start = ts_node_start_byte(node);
-        uint32_t end = ts_node_end_byte(node);
-        size_t len = (end > start) ? (end - start) : 0;
-        // буфер для текста токена (ограничим разумно)
-        size_t buf_len = len + 1 + 32;
-        char *buf = (char*)malloc(buf_len);
-        if (buf) {
-            if (len > 0) memcpy(buf, source + start, len);
-            buf[len] = '\0';
-            // показываем текст только для некоторых типов и сокращаем имя
-            const char *short_name = NULL;
-            if (strcmp(type, "identifier") == 0) short_name = "id";
-            else if (strcmp(type, "dec") == 0) short_name = "num";
-            else if (strcmp(type, "hex") == 0) short_name = "hex";
-            else if (strcmp(type, "bits") == 0) short_name = "bits";
-            else if (strcmp(type, "str") == 0) short_name = "str";
-            else if (strcmp(type, "char") == 0) short_name = "char";
-            else if (strcmp(type, "bool") == 0) short_name = "bool";
+    if (is_trivial_wrapper(node)) {
+        uint32_t cc = ts_node_child_count(node);
+        for (uint32_t i=0;i<cc;i++) {
+            TSNode child = ts_node_child(node, i);
+            if (!ts_node_is_named(child)) continue;
+            dump_node_dot(out, child, parent_printed_id, next_id, source, filter);
+            return;
+        }
+    }
+    int print_node = tf_contains(filter, type);
+    int my_id = -1;
+    if (print_node) {
+        my_id = (*next_id)++;
 
-            if (short_name) {
-                size_t label_len = strlen(short_name) + 2 + len + 1;
-                char *label = (char*)malloc(label_len);
-                if (label) {
-                    sprintf(label, "%s: %s", short_name, buf);
-                    print_label_escaped(out, label);
-                    free(label);
+        // вывод вершины
+        fprintf(out, "  n%d [label=", my_id);
+        // если узел — лист, добавляем текст токена для выбранных типов: short: text
+        uint32_t child_count = ts_node_child_count(node);
+        if (child_count == 0) {
+            uint32_t start = ts_node_start_byte(node);
+            uint32_t end = ts_node_end_byte(node);
+            size_t len = (end > start) ? (end - start) : 0;
+            size_t buf_len = len + 1 + 32;
+            char *buf = (char*)malloc(buf_len);
+            if (buf) {
+                if (len > 0) memcpy(buf, source + start, len);
+                buf[len] = '\0';
+                const char *short_name = NULL;
+                if (strcmp(type, "identifier") == 0) short_name = "id";
+                else if (strcmp(type, "dec") == 0) short_name = "num";
+                else if (strcmp(type, "hex") == 0) short_name = "hex";
+                else if (strcmp(type, "bits") == 0) short_name = "bits";
+                else if (strcmp(type, "str") == 0) short_name = "str";
+                else if (strcmp(type, "char") == 0) short_name = "char";
+                else if (strcmp(type, "bool") == 0) short_name = "bool";
+
+                if (short_name) {
+                    size_t label_len = strlen(short_name) + 2 + len + 1;
+                    char *label = (char*)malloc(label_len);
+                    if (label) {
+                        sprintf(label, "%s: %s", short_name, buf);
+                        print_label_escaped(out, label);
+                        free(label);
+                    } else {
+                        print_label_escaped(out, short_name);
+                    }
                 } else {
-                    print_label_escaped(out, short_name);
+                    print_label_escaped(out, type);
                 }
+                free(buf);
             } else {
                 print_label_escaped(out, type);
             }
-            free(buf);
         } else {
             print_label_escaped(out, type);
         }
-    } else {
-        print_label_escaped(out, type);
-    }
-    /* highlight certain node types for clarity */
-    if (strcmp(type, "assignment") == 0) {
-        fprintf(out, ", style=filled, fillcolor=lightblue, shape=box");
-    } else if (strcmp(type, "if_statement") == 0) {
-        fprintf(out, ", style=filled, fillcolor=lightgreen, shape=box");
-    } else if (strcmp(type, "funcDef") == 0) {
-        fprintf(out, ", style=filled, fillcolor=lightgrey, shape=ellipse");
-    } else if (strcmp(type, "varDecl") == 0) {
-        fprintf(out, ", style=filled, fillcolor=khaki, shape=box");
-    }
-    fprintf(out, "];\n");
-    // если есть родитель — вывод ребра parent -> this
-    if (parent_id >= 0) {
-        fprintf(out, "  n%d -> n%d;\n", parent_id, my_id);
+        if (strcmp(type, "assignment") == 0) {
+            fprintf(out, ", style=filled, fillcolor=lightblue, shape=box");
+        } else if (strcmp(type, "if_statement") == 0) {
+            fprintf(out, ", style=filled, fillcolor=lightgreen, shape=box");
+        } else if (strcmp(type, "funcDef") == 0) {
+            fprintf(out, ", style=filled, fillcolor=lightgrey, shape=ellipse");
+        } else if (strcmp(type, "varDecl") == 0) {
+            fprintf(out, ", style=filled, fillcolor=khaki, shape=box");
+        }
+        fprintf(out, "];\n");
+        if (parent_printed_id >= 0) {
+            fprintf(out, "  n%d -> n%d;\n", parent_printed_id, my_id);
+        }
     }
 
-    // обходим детей
+    int next_parent = print_node ? my_id : parent_printed_id;
+    uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
         TSNode child = ts_node_child(node, i);
-        dump_node_dot(out, child, my_id, next_id, source);
+        dump_node_dot(out, child, next_parent, next_id, source, filter);
     }
 }
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <input.v2> <output.dot>\n", argv[0]);
+        fprintf(stderr, "usage: %s <input.v2> <output.dot> [--only type1,type2]\n", argv[0]);
         return 1;
     }
 
     const char *input_path = argv[1];
     const char *output_path = argv[2];
+    TypeFilter filter; tf_init(&filter);
+    for (int i=3;i<argc;i++) {
+        if (strcmp(argv[i], "--only") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--only requires a comma-separated list of types\n");
+                tf_free(&filter);
+                return 1;
+            }
+            tf_parse(&filter, argv[++i]);
+        } else if (strncmp(argv[i], "--only=", 7) == 0) {
+            tf_parse(&filter, argv[i] + 7);
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            tf_free(&filter);
+            return 1;
+        }
+    }
 
     size_t len = 0;
     char *source = read_file(input_path, &len);
-    if (!source) return 2;
+    if (!source) { tf_free(&filter); return 2; }
 
     TSParser *parser = ts_parser_new();
     if (!ts_parser_set_language(parser, tree_sitter_v2lang_test())) {
@@ -148,6 +239,7 @@ int main(int argc, char **argv) {
         ts_tree_delete(tree);
         ts_parser_delete(parser);
         free(source);
+        tf_free(&filter);
         return 5;
     }
 
@@ -155,12 +247,38 @@ int main(int argc, char **argv) {
     fprintf(out, "digraph AST {\n");
     int next_id = 0;
     TSNode root = ts_tree_root_node(tree);
-    dump_node_dot(out, root, -1, &next_id, source);
+    dump_node_dot(out, root, -1, &next_id, source, &filter);
     fprintf(out, "}\n");
 
     fclose(out);
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     free(source);
+    tf_free(&filter);
     return 0;
+}
+static int is_wrapper_type(const char *type) {
+    const char *wrappers[] = {
+        "expr","_expr","logical_or","logical_and","bitwise_or","bitwise_xor",
+        "bitwise_and","equality","relational","shift","add","mul","unary",
+        "postfix","primary","exprList","statement_list","statement_seq","statement"
+    };
+    for (size_t i=0;i<sizeof(wrappers)/sizeof(wrappers[0]);i++) {
+        if (strcmp(type, wrappers[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static int is_trivial_wrapper(TSNode node) {
+    const char *type = ts_node_type(node);
+    if (!is_wrapper_type(type)) return 0;
+    uint32_t cc = ts_node_child_count(node);
+    int named_count = 0;
+    for (uint32_t i=0;i<cc;i++) {
+        TSNode child = ts_node_child(node, i);
+        if (!ts_node_is_named(child)) continue;
+        named_count++;
+        if (named_count > 1) return 0;
+    }
+    return named_count == 1;
 }

@@ -1,4 +1,3 @@
-// grammar.js — комбинированная версия (структура + лексика)
 module.exports = grammar({
   name: 'v2lang_test',
 
@@ -8,14 +7,11 @@ module.exports = grammar({
   rules: {
     // ---- Входной файл ----
     source_file: $ => repeat($.sourceItem),
-
-    // ---- Комментарии ----
     comment: _ => token(choice(
       seq('//', /[^\n]*/),
       seq('{', /[^}]*/, '}')
     )),
 
-    // ---- Элементы программы ----
     sourceItem: $ => choice($.funcDef),
 
     // ---- Типы ----

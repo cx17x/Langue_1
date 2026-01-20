@@ -1,0 +1,116 @@
+method x()
+var a, b: int;
+begin
+    send_byte('x');
+end;
+
+method y() begin send_byte('y'); end;
+method z() begin send_byte('z'); end;
+
+method main()
+var argc: int;
+    argv: array[] of string;
+    i, a, b: int;
+begin
+    send_byte('1');
+
+    while 1 do begin
+        send_byte('2');
+
+        while 2 do begin
+            send_byte('3');
+
+            if 3 then
+                send_byte('b');
+            else if 4 then
+                send_byte('c');
+            else begin
+                send_byte('l');
+                send_byte('4');
+            end;
+        end;
+
+        send_byte('5');
+
+        if 5 then
+            send_byte('b');
+        else if 6 then
+            send_byte('c');
+        else
+            send_byte('6');
+
+        send_byte('7');
+
+        repeat begin
+            send_byte('8');
+            if 9 then send_byte('b');
+        end;
+        while 10;
+
+        send_byte('1');
+        send_byte('1');
+
+        if 11 then
+            send_byte('b');
+        else if 12 then
+            send_byte('c');
+        else begin
+            send_byte('1');
+            send_byte('2');
+        end;
+
+        send_byte('1');
+        send_byte('3');
+    end;
+
+    send_byte('1');
+    send_byte('4');
+
+    if a > 3 then begin
+        send_byte('1');
+        send_byte('n');
+    end else begin
+        send_byte('2');
+        send_byte('n');
+    end;
+
+    while i < 10 do begin
+        if a > b then
+            i := i + 2;
+        else if 2 * 3 then
+            send_byte('b');
+        else
+            send_byte('c');
+    end;
+
+    if 1 then
+        if 2 then
+            if 3 then x();
+            else y();
+        else
+            z();
+
+    if a > 3 then begin
+        send_byte('1');
+        send_byte('n');
+    end else begin
+        send_byte('2');
+        send_byte('n');
+        send_byte('2');
+        send_byte('2');
+        send_byte('n');
+        send_byte('2');
+        send_byte('2');
+        send_byte('2');
+        send_byte('n');
+    end;
+
+    while a < 3 do begin
+        send_byte('3');
+        send_byte('n');
+    end;
+
+    send_byte('H');
+    send_byte('i');
+    send_byte('n');
+end;
