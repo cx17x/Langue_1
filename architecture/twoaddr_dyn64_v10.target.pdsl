@@ -5,8 +5,7 @@ architecture twoaddr_dyn64_v10 {
 		Variant requirements (v10):
 		  - typing: dynamic (values are 64-bit tagged)
 		  - instruction format: two-address (dst = dst op src)
-		  - memory banks: code + data
-		  - MVP: add + mov + li + hlt
+		  - memory banks: code + data (+ stack added for better programs/tests)
 
 		Tagged Value (TV), 64-bit:
 		  TV[63:56] = tag
@@ -15,15 +14,35 @@ architecture twoaddr_dyn64_v10 {
 		Tags (same idea as stackdyn64):
 		  TAG_BOOL = 0x01  => 0x0100000000000000
 		  TAG_INT  = 0x02  => 0x0200000000000000
+		  (numeric accepted tags for arithmetic/bitwise/cmp checks):
+		    TAG_BOOL=0x01, TAG_INT=0x02, TAG_UINT=0x03, TAG_CHAR=0x04
 
-		For MVP:
-		  - li loads a TAG_INT from imm16 (sign-extended to 56-bit payload)
-		  - add/sub assume numeric tags (BOOL/INT/UINT/CHAR), decode payload as signed, pack TAG_INT
+		Implemented:
+		  - mov, li, add, sub, mul, div
+		  - bitwise: iand, ior, ixor, inot   (payload-wise, repack TAG_INT)
+		  - logical: land, lor, lnot         (truthy by payload, result TAG_BOOL)
+		  - cmp + flags (zf/sf)
+		  - jmp, jz, jnz, jn
+		  - je, jne, jl, jle, jg, jge
+		  - ret7 (legacy): jump to address stored in r7 payload
+		  - stack: ldsp, ldbp, push, pop, dup, drop, swap
+		  - call/ret (stack-based frames like stackdyn64)
+		  - memory: ld/st (abs imm16), ldr/str (addr in reg payload)
+		  - outd (decimal print), outb (ASCII byte output), setio
+		  - inb (read byte from rin as TAG_INT)
+
+		Trap convention:
+		  - status == 0 => normal execution
+		  - status != 0 => “halt by trap” (instructions do not advance ip)
 	*/
 
 	registers:
 		storage ip [32];       // instruction pointer (byte address in CODE)
 		storage status [32];   // 0 = OK, non-zero = trap
+
+		// stack support
+		storage sp [32];       // stack pointer (byte address in STACK, grows down)
+		storage bp [32];       // base/frame pointer
 
 		// flags
 		storage zf [32];       // zero flag
@@ -73,6 +92,12 @@ architecture twoaddr_dyn64_v10 {
 			granularity = 1;
 		}
 
+		range stackMem [0x0000 .. 0xffff] {
+			cell = 8;
+			endianess = little-endian;
+			granularity = 1;
+		}
+
 instructions:
 
     // ---- encodings ----
@@ -87,217 +112,655 @@ instructions:
         r7 = 0111
     };
 
+    encode imm8  field = immediate [8];
     encode imm16 field = immediate [16];
 
-    // ---- control ----
-    // 4 bytes: opcode(1) + 24 bits padding
+    // ---- constants used inline ----
+    // mask56 = 0x00ffffffffffffff
+    // sign56 = 0x0080000000000000
+    // TAG_BOOL = 0x0100000000000000
+    // TAG_INT  = 0x0200000000000000
+
+    // =========================
+    // CONTROL
+    // =========================
+
     instruction nop = { 0000 0000, 0000 0000 0000 0000 0000 0000 } {
-        ip = ip + 4;
+        if status != 0 then ip = ip; else ip = ip + 4;
     };
 
     instruction hlt = { 0000 0001, 0000 0000 0000 0000 0000 0000 } {
         // stop execution
     };
 
-    // ---- moves / immediates ----
-    // mov dst, src : opcode(1) + dst(4) + src(4) + 16 bits padding
+    // ret7 (legacy): jump to address stored in r7 payload (low 16 bits)
+    // usage pattern: li r7, <addr>; ret7
+    instruction ret7 = { 0000 0010, 0000 0000 0000 0000 0000 0000 } {
+        if status != 0 then {
+            ip = ip;
+        } else {
+            t0 = r7 & 0x00ffffffffffffff;
+            ip = t0 & 0xffff;
+        }
+    };
+
+    // =========================
+    // STACK + CALL/RET (like stackdyn64)
+    // =========================
+
+    // ldsp imm16 : sp = imm16
+    instruction ldsp = { 0001 1000, 0000 0000, imm16 as value } {
+        if status != 0 then ip = ip; else {
+            sp = value & 0xffff;
+            ip = ip + 4;
+        }
+    };
+
+    // ldbp imm16 : bp = imm16
+    instruction ldbp = { 0001 1001, 0000 0000, imm16 as value } {
+        if status != 0 then ip = ip; else {
+            bp = value & 0xffff;
+            ip = ip + 4;
+        }
+    };
+
+    // push src : sp -= 8; stack[sp] = src
+    instruction push = { 0001 1010, reg4 as src, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            sp = (sp - 8) & 0xffff;
+            stackMem:8[sp] = src;
+            ip = ip + 4;
+        }
+    };
+
+    // pop dst : dst = stack[sp]; sp += 8
+    instruction pop = { 0001 1011, reg4 as dst, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            dst = stackMem:8[sp];
+            sp = (sp + 8) & 0xffff;
+            ip = ip + 4;
+        }
+    };
+
+    // dup : duplicate top (push copy)
+    instruction dup = { 0001 1100, 0000 0000 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = stackMem:8[sp];
+            sp = (sp - 8) & 0xffff;
+            stackMem:8[sp] = t0;
+            ip = ip + 4;
+        }
+    };
+
+    // drop : pop and discard
+    instruction drop = { 0001 1101, 0000 0000 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            sp = (sp + 8) & 0xffff;
+            ip = ip + 4;
+        }
+    };
+
+    // swap : swap top two
+    instruction swap = { 0001 1110, 0000 0000 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = stackMem:8[sp];
+            t1 = stackMem:8[(sp + 8) & 0xffff];
+            stackMem:8[sp] = t1;
+            stackMem:8[(sp + 8) & 0xffff] = t0;
+            ip = ip + 4;
+        }
+    };
+
+    // call target : pushes return_ip and old_bp (as TAG_INT), bp=sp, ip=target
+    instruction call = { 0001 0011, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip; else {
+            // push return_ip (TAG_INT)
+            t0 = (ip + 4) & 0xffff;
+            t0 = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
+            sp = (sp - 8) & 0xffff;
+            stackMem:8[sp] = t0;
+
+            // push old bp (TAG_INT)
+            t1 = bp & 0xffff;
+            t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+            sp = (sp - 8) & 0xffff;
+            stackMem:8[sp] = t1;
+
+            bp = sp;
+            ip = target & 0xffff;
+        }
+    };
+
+    // ret : restore old bp, return ip, drop frame
+    instruction ret = { 0001 0100, 0000 0000 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            // stack[bp]   = old_bp (TAG_INT)
+            // stack[bp+8] = return_ip (TAG_INT)
+            t0 = stackMem:8[bp];
+            t1 = stackMem:8[(bp + 8) & 0xffff];
+
+            bp = (t0 & 0x00ffffffffffffff) & 0xffff;
+            ip = (t1 & 0x00ffffffffffffff) & 0xffff;
+
+            sp = (bp + 16) & 0xffff;
+        }
+    };
+
+    // =========================
+    // MOVES / IMMEDIATES / IO
+    // =========================
+
     instruction mov = { 0010 0000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
-        dst = src;
-        ip = ip + 4;
+        if status != 0 then ip = ip; else {
+            dst = src;
+            ip = ip + 4;
+        }
     };
 
-    // li dst, imm16 : opcode(1) + dst(4) + pad4(0000) + imm16(2 bytes)
+    // li dst, imm16 : sign-extend 16 -> 64, pack as TAG_INT
     instruction li = { 0010 0001, reg4 as dst, 0000, imm16 as imm } {
-        // sign-extend 16 -> 64
-        t0 = imm;
-        t0 = t0 ^ 0x8000;
-        t0 = t0 - 0x8000;
+        if status != 0 then ip = ip; else {
+            t0 = imm;
+            t0 = t0 ^ 0x8000;
+            t0 = t0 - 0x8000;
 
-        // pack TAG_INT (payload 56-bit)
-        t0 = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-        dst = t0;
+            t0 = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
+            dst = t0;
 
-        ip = ip + 4;
+            ip = ip + 4;
+        }
     };
 
-    // ---- arithmetic ----
+    // inb dst : read one byte from rin, pack as TAG_INT into dst
+    instruction inb = { 0010 0010, reg4 as dst, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = rin;  // 0..255
+            t0 = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
+            dst = t0;
+            ip = ip + 4;
+        }
+    };
+
+    // setio imm8 : set hidden IO port selector
+    // encoding: opcode(1) + imm8(1) + pad16(2)
+    instruction setio = { 0110 0000, imm8 as port, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            ioport = port;
+            ip = ip + 4;
+        }
+    };
+
+    // outb src : write low byte of payload(src) to rout
+    instruction outb = { 0110 0011, reg4 as src, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src & 0x00ffffffffffffff;
+            rout = t0 & 0xff;
+            ip = ip + 4;
+        }
+    };
+
+    // =========================
+    // MEMORY (dataMem)
+    // =========================
+
+    // ld dst, addr16 : dst = dataMem:8[addr16]
+    instruction ld = { 0011 0000, reg4 as dst, 0000, imm16 as addr } {
+        if status != 0 then ip = ip; else {
+            t0 = addr & 0xffff;
+            dst = dataMem:8[t0];
+            ip = ip + 4;
+        }
+    };
+
+    // st src, addr16 : dataMem:8[addr16] = src
+    // NOTE: operand order in ASM is "st <src>, <addr>"
+    instruction st = { 0011 0001, reg4 as src, 0000, imm16 as addr } {
+        if status != 0 then ip = ip; else {
+            t0 = addr & 0xffff;
+            dataMem:8[t0] = src;
+            ip = ip + 4;
+        }
+    };
+
+    // ldr dst, ra : dst = dataMem:8[payload(ra) & 0xffff]
+    instruction ldr = { 0011 0010, reg4 as dst, reg4 as ra, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = (ra & 0x00ffffffffffffff) & 0xffff;
+            dst = dataMem:8[t0];
+            ip = ip + 4;
+        }
+    };
+
+    // str ra, src : dataMem:8[payload(ra) & 0xffff] = src
+    instruction str = { 0011 0011, reg4 as ra, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = (ra & 0x00ffffffffffffff) & 0xffff;
+            dataMem:8[t0] = src;
+            ip = ip + 4;
+        }
+    };
+
+    // =========================
+    // ARITHMETIC (numeric-only)
+    // =========================
+
     instruction add = { 0100 0000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
-        t0 = src;
-        t1 = dst;
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
 
-        // check src tag
-        t2 = (t0 >> 56) & 0xff;
-        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-        if t3 != 0 then ip = ip; else { status = 1; }
+            // check src tag
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                // check dst tag
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
 
-        // check dst tag
-        t2 = (t1 >> 56) & 0xff;
-        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-        if t3 != 0 then ip = ip; else { status = 1; }
+                    // decode signed 56-bit
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        // decode signed 56-bit payloads
-        t0 = t0 & 0x00ffffffffffffff;
-        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+                    t1 = t1 & 0x00ffffffffffffff;
+                    t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        t1 = t1 & 0x00ffffffffffffff;
-        t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+                    t1 = t1 + t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
 
-        // add and repack TAG_INT
-        t1 = t1 + t0;
-        t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
-
-        dst = t1;
-        ip = ip + 4;
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
     };
 
-    // sub dst, src : dst = dst - src (added)
     instruction sub = { 0100 0001, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
-        t0 = src;
-        t1 = dst;
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
 
-        // check src tag
-        t2 = (t0 >> 56) & 0xff;
-        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-        if t3 != 0 then ip = ip; else { status = 1; }
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
 
-        // check dst tag
-        t2 = (t1 >> 56) & 0xff;
-        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-        if t3 != 0 then ip = ip; else { status = 1; }
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        // decode signed 56-bit payloads
-        t0 = t0 & 0x00ffffffffffffff;
-        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+                    t1 = t1 & 0x00ffffffffffffff;
+                    t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        t1 = t1 & 0x00ffffffffffffff;
-        t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+                    t1 = t1 - t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
 
-        // subtract and repack TAG_INT
-        t1 = t1 - t0;
-        t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
-
-        dst = t1;
-        ip = ip + 4;
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
     };
 
-    // ---- compare + flags ----
-    // cmp a, b : sets zf/sf according to (a - b) on signed payloads
+    instruction mul = { 0100 0010, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
+
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
+
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+
+                    t1 = t1 & 0x00ffffffffffffff;
+                    t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+
+                    t1 = t1 * t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
+    };
+
+    // div dst, src : integer division, trap on div0 => status=2
+    instruction div = { 0100 0011, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
+
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
+
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+
+                    t1 = t1 & 0x00ffffffffffffff;
+                    t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+
+                    if t0 == 0 then {
+                        status = 2;
+                        ip = ip;
+                    } else {
+                        t1 = t1 / t0;
+                        t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+                        dst = t1;
+                        ip = ip + 4;
+                    }
+                }
+            }
+        }
+    };
+
+    // =========================
+    // BITWISE (payload-wise) -> TAG_INT
+    // =========================
+
+    instruction iand = { 0100 1000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
+
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
+
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t1 = t1 & 0x00ffffffffffffff;
+
+                    t1 = t1 & t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
+    };
+
+    instruction ior = { 0100 1001, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
+
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
+
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t1 = t1 & 0x00ffffffffffffff;
+
+                    t1 = t1 | t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
+    };
+
+    instruction ixor = { 0100 1010, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = src;
+            t1 = dst;
+
+            t2 = (t0 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+                t2 = (t1 >> 56) & 0xff;
+                t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+                if t3 == 0 then { status = 1; ip = ip; } else {
+
+                    t0 = t0 & 0x00ffffffffffffff;
+                    t1 = t1 & 0x00ffffffffffffff;
+
+                    t1 = t1 ^ t0;
+                    t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+                    dst = t1;
+                    ip = ip + 4;
+                }
+            }
+        }
+    };
+
+    instruction inot = { 0100 1011, reg4 as dst, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t1 = dst;
+
+            t2 = (t1 >> 56) & 0xff;
+            t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+            if t3 == 0 then { status = 1; ip = ip; } else {
+
+                t1 = t1 & 0x00ffffffffffffff;
+                t1 = (~t1) & 0x00ffffffffffffff;
+
+                t1 = 0x0200000000000000 | t1;
+                dst = t1;
+
+                ip = ip + 4;
+            }
+        }
+    };
+
+    // =========================
+    // LOGICAL BOOL OPS (stackdyn64-like) -> TAG_BOOL
+    // =========================
+
+    instruction land = { 0100 1100, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = dst;
+            t1 = src;
+
+            t2 = (t0 & 0x00ffffffffffffff) != 0;
+            t3 = (t1 & 0x00ffffffffffffff) != 0;
+
+            t2 = t2 & t3;
+            t2 = 0x0100000000000000 | (t2 & 1);
+
+            dst = t2;
+            ip = ip + 4;
+        }
+    };
+
+    instruction lor = { 0100 1101, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = dst;
+            t1 = src;
+
+            t2 = (t0 & 0x00ffffffffffffff) != 0;
+            t3 = (t1 & 0x00ffffffffffffff) != 0;
+
+            t2 = t2 | t3;
+            t2 = 0x0100000000000000 | (t2 & 1);
+
+            dst = t2;
+            ip = ip + 4;
+        }
+    };
+
+    instruction lnot = { 0100 1110, reg4 as dst, 0000, 0000 0000 0000 0000 } {
+        if status != 0 then ip = ip; else {
+            t0 = dst;
+
+            t2 = (t0 & 0x00ffffffffffffff) == 0;
+            t2 = 0x0100000000000000 | (t2 & 1);
+
+            dst = t2;
+            ip = ip + 4;
+        }
+    };
+
+    // =========================
+    // CMP + FLAGS
+    // =========================
+
     instruction cmp = { 0101 0000, reg4 as a, reg4 as b, 0000 0000 0000 0000 } {
-        // decode a
-        t0 = a & 0x00ffffffffffffff;
-        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+        if status != 0 then ip = ip; else {
+            // decode a
+            t0 = a & 0x00ffffffffffffff;
+            t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        // decode b
-        t1 = b & 0x00ffffffffffffff;
-        t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+            // decode b
+            t1 = b & 0x00ffffffffffffff;
+            t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        // diff = a - b
-        t2 = t0 - t1;
+            t2 = t0 - t1;
 
-        // flags
-        if t2 == 0 then zf = 1; else zf = 0;
-        if t2 < 0 then sf = 1; else sf = 0;
+            if t2 == 0 then zf = 1; else zf = 0;
+            if t2 < 0 then sf = 1; else sf = 0;
 
-        ip = ip + 4;
+            ip = ip + 4;
+        }
     };
 
-    // ---- jumps ----
-    // encoding: opcode(1) + pad(1) + imm16(2)
+    // =========================
+    // JUMPS
+    // =========================
+
     instruction jmp = { 0111 0000, 0000 0000, imm16 as target } {
-        ip = target;
+        if status != 0 then ip = ip; else ip = target & 0xffff;
     };
 
     instruction jz = { 0111 0001, 0000 0000, imm16 as target } {
-        if zf != 0 then ip = target; else ip = ip + 4;
+        if status != 0 then ip = ip;
+        else if zf != 0 then ip = target & 0xffff; else ip = ip + 4;
     };
 
     instruction jnz = { 0111 0010, 0000 0000, imm16 as target } {
-        if zf == 0 then ip = target; else ip = ip + 4;
+        if status != 0 then ip = ip;
+        else if zf == 0 then ip = target & 0xffff; else ip = ip + 4;
     };
 
-    // jn: jump if negative (sf != 0) (added)
     instruction jn = { 0111 0011, 0000 0000, imm16 as target } {
-        if sf != 0 then ip = target; else ip = ip + 4;
+        if status != 0 then ip = ip;
+        else if sf != 0 then ip = target & 0xffff; else ip = ip + 4;
     };
 
-    // ---- output decimal ----
+    instruction je = { 0111 0100, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if zf != 0 then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    instruction jne = { 0111 0101, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if zf == 0 then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    instruction jl = { 0111 0110, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if sf != 0 then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    instruction jle = { 0111 0111, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if (sf != 0) | (zf != 0) then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    instruction jg = { 0111 1000, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if (sf == 0) & (zf == 0) then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    instruction jge = { 0111 1001, 0000 0000, imm16 as target } {
+        if status != 0 then ip = ip;
+        else if sf == 0 then ip = target & 0xffff; else ip = ip + 4;
+    };
+
+    // =========================
+    // OUTPUT DECIMAL
+    // =========================
+
     // outd src : print signed payload as decimal ASCII to rout, then '\n'
     // NOTE: decimal printing supports 0..65535 (and negatives in that range)
     instruction outd = { 0110 0010, reg4 as src, 0000, 0000 0000 0000 0000 } {
-        // extract signed payload (56-bit signed)
-        t0 = src;
-        t0 = t0 & 0x00ffffffffffffff;
-        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;  // sign-extend 56 -> 64
+        if status != 0 then ip = ip; else {
+            // extract signed payload (56-bit signed)
+            t0 = src;
+            t0 = t0 & 0x00ffffffffffffff;
+            t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
 
-        // handle sign
-        t1 = 0;                  // neg flag
-        if t0 < 0 then {
-            t1 = 1;
-            t0 = 0 - t0;         // abs
-        }
-
-        // print '-'
-        if t1 != 0 then {
-            rout = 45;           // '-'
-        }
-
-        // Special case: 0
-        if t0 == 0 then {
-            rout = 48;           // '0'
-            rout = 10;           // '\n'
-            ip = ip + 4;
-        } else {
-            // print number (0..65535)
-            // d4 = t0 / 10000; t0 %= 10000
-            t2 = t0 / 10000;
-            t0 = t0 - (t2 * 10000);
-
-            // d3 = t0 / 1000; t0 %= 1000
-            t3 = t0 / 1000;
-            t0 = t0 - (t3 * 1000);
-
-            // started flag (reuse t1)
+            // handle sign
             t1 = 0;
-
-            // print d4 if nonzero
-            if t2 != 0 then {
-                rout = t2 + 48;
+            if t0 < 0 then {
                 t1 = 1;
+                t0 = 0 - t0;
             }
 
-            // print d3 if started or nonzero
-            if (t1 != 0) | (t3 != 0) then {
-                rout = t3 + 48;
-                t1 = 1;
+            if t1 != 0 then {
+                rout = 45;
             }
 
-            // d2 = t0 / 100; t0 %= 100
-            t2 = t0 / 100;
-            t0 = t0 - (t2 * 100);
+            if t0 == 0 then {
+                rout = 48;
+                rout = 10;
+                ip = ip + 4;
+            } else {
+                t2 = t0 / 10000;
+                t0 = t0 - (t2 * 10000);
 
-            if (t1 != 0) | (t2 != 0) then {
-                rout = t2 + 48;
-                t1 = 1;
+                t3 = t0 / 1000;
+                t0 = t0 - (t3 * 1000);
+
+                t1 = 0;
+
+                if t2 != 0 then {
+                    rout = t2 + 48;
+                    t1 = 1;
+                }
+
+                if (t1 != 0) | (t3 != 0) then {
+                    rout = t3 + 48;
+                    t1 = 1;
+                }
+
+                t2 = t0 / 100;
+                t0 = t0 - (t2 * 100);
+
+                if (t1 != 0) | (t2 != 0) then {
+                    rout = t2 + 48;
+                    t1 = 1;
+                }
+
+                t2 = t0 / 10;
+                t0 = t0 - (t2 * 10);
+
+                if (t1 != 0) | (t2 != 0) then {
+                    rout = t2 + 48;
+                    t1 = 1;
+                }
+
+                rout = t0 + 48;
+                rout = 10;
+
+                ip = ip + 4;
             }
-
-            // d1 = t0 / 10; t0 %= 10
-            t2 = t0 / 10;
-            t0 = t0 - (t2 * 10);
-
-            if (t1 != 0) | (t2 != 0) then {
-                rout = t2 + 48;
-                t1 = 1;
-            }
-
-            // last digit d0 = t0
-            rout = t0 + 48;
-
-            // newline
-            rout = 10;
-
-            ip = ip + 4;
         }
     };
+
+    // =========================
+    // MNEMONICS
+    // =========================
 
     mnemonics:
         format plain0 is "";
@@ -309,8 +772,44 @@ instructions:
 
         mnemonic mov(dst, src) plain2;
         mnemonic li(dst, imm)  plain2;
+        mnemonic inb(dst)      plain1;
+
+        mnemonic setio(port)   plain1;
+        mnemonic outb(src)     plain1;
+        mnemonic outd(src)     plain1;
+
+        mnemonic ldsp(value)   plain1;
+        mnemonic ldbp(value)   plain1;
+
+        mnemonic push(src)     plain1;
+        mnemonic pop(dst)      plain1;
+        mnemonic dup()         plain0;
+        mnemonic drop()        plain0;
+        mnemonic swap()        plain0;
+
+        mnemonic call(target)  plain1;
+        mnemonic ret()         plain0;
+        mnemonic ret7()        plain0;
+
+        mnemonic ld(dst, addr) plain2;
+        // NOTE: st order is (src, addr) because of encoding
+        mnemonic st(src, addr) plain2;
+        mnemonic ldr(dst, ra)  plain2;
+        mnemonic str(ra, src)  plain2;
+
         mnemonic add(dst, src) plain2;
         mnemonic sub(dst, src) plain2;
+        mnemonic mul(dst, src) plain2;
+        mnemonic div(dst, src) plain2;
+
+        mnemonic iand(dst, src) plain2;
+        mnemonic ior(dst, src)  plain2;
+        mnemonic ixor(dst, src) plain2;
+        mnemonic inot(dst)      plain1;
+
+        mnemonic land(dst, src) plain2;
+        mnemonic lor(dst, src)  plain2;
+        mnemonic lnot(dst)      plain1;
 
         mnemonic cmp(a, b)     plain2;
 
@@ -319,6 +818,11 @@ instructions:
         mnemonic jnz(target)   plain1;
         mnemonic jn(target)    plain1;
 
-        mnemonic outd(src)     plain1;
+        mnemonic je(target)    plain1;
+        mnemonic jne(target)   plain1;
+        mnemonic jl(target)    plain1;
+        mnemonic jle(target)   plain1;
+        mnemonic jg(target)    plain1;
+        mnemonic jge(target)   plain1;
 
 }
