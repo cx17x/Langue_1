@@ -1,3 +1,3 @@
-Task AssembleDebug started with id 914d276e-cfdd-4005-b693-47457018f29b
-abort_threads: Failed aborting id: 0x16c497000, mono_thread_manage will ignore it
+Task AssembleDebug started with id 89be0caa-1609-4225-bb60-3752cbcb9737
+abort_threads: Failed aborting id: 0x16e66f000, mono_thread_manage will ignore it
 

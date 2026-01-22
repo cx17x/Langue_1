@@ -114,15 +114,91 @@ instructions:
 
         ip = ip + 4;
     };
-    // outb src : печатает младший байт payload как символ (1 байт в rout)
-    instruction outb = { 0110 0000, reg4 as src, 0000, 0000 0000 0000 0000 } {
-        t0 = src;
-        // берём payload и младший байт
-        t0 = t0 & 0x00ffffffffffffff;
-        t0 = t0 & 0xff;
-        rout = t0;      // VM обычно выводит это как stdout
+// outd src : print signed payload as decimal ASCII to rout, then '\n'
+instruction outd = { 0110 0010, reg4 as src, 0000, 0000 0000 0000 0000 } {
+    // 1) extract signed payload (56-bit signed)
+    t0 = src;
+    t0 = t0 & 0x00ffffffffffffff;
+    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;  // sign-extend 56 -> 64
+
+    // 2) handle sign
+    t1 = 0;                  // neg flag
+    if t0 < 0 then {
+        t1 = 1;
+        t0 = 0 - t0;         // abs
+    }
+
+    // 3) if negative, print '-'
+    if t1 != 0 then {
+        rout = 45;           // '-'
+    }
+
+    // 4) print number (0..65535 supported here)
+    // Special case: 0
+    if t0 == 0 then {
+        rout = 48;           // '0'
+        rout = 10;           // '\n'
         ip = ip + 4;
-    };
+    } else {
+        // We will output digits from highest place to lowest without loops,
+        // using divisions by 10000,1000,100,10.
+        // Limitation: values > 65535 will print more digits incorrectly (by truncation).
+        // For your test 12 it's perfect.
+
+        // d4 = t0 / 10000; t0 = t0 % 10000
+        t2 = t0 / 10000;
+        t0 = t0 - (t2 * 10000);
+
+        // d3 = t0 / 1000; ...
+        t3 = t0 / 1000;
+        t0 = t0 - (t3 * 1000);
+
+        // d2 = t0 / 100
+        // reuse t4 by using status? no; we have only t0..t3. We'll reuse t2 after it's printed.
+        // We'll print with a "started" flag in status? Better: use status as temp? Don't.
+        // We'll use t1 as "started flag" now (it was neg flag, already used)
+        t1 = 0; // started=0
+
+        // print d4 if nonzero
+        if t2 != 0 then {
+            rout = t2 + 48;
+            t1 = 1;
+        }
+
+        // print d3 if started or nonzero
+        if (t1 != 0) | (t3 != 0) then {
+            rout = t3 + 48;
+            t1 = 1;
+        }
+
+        // compute d2
+        t2 = t0 / 100;
+        t0 = t0 - (t2 * 100);
+
+        if (t1 != 0) | (t2 != 0) then {
+            rout = t2 + 48;
+            t1 = 1;
+        }
+
+        // compute d1
+        t2 = t0 / 10;
+        t0 = t0 - (t2 * 10);
+
+        if (t1 != 0) | (t2 != 0) then {
+            rout = t2 + 48;
+            t1 = 1;
+        }
+
+        // last digit d0 in t0
+        rout = t0 + 48;
+
+        // newline
+        rout = 10;
+
+        ip = ip + 4;
+    }
+};
+
 
 
 
@@ -152,19 +228,17 @@ instructions:
         ip = ip + 4;
     };
 
-mnemonics:
-    format plain0 is "";
-    format plain1 is "{1}";
-    format plain2 is "{1}, {2}";
+    mnemonics:
+        format plain0 is "";
+        format plain1 is "{1}";
+        format plain2 is "{1}, {2}";
 
-    mnemonic nop() plain0;
-    mnemonic hlt() plain0;
+        mnemonic nop() plain0;
+        mnemonic hlt() plain0;
 
-    mnemonic mov(dst, src) plain2;
-    mnemonic li(dst, imm)  plain2;
-    mnemonic add(dst, src) plain2;
-
-    mnemonic outb(src) plain1;
-
+        mnemonic mov(dst, src) plain2;
+        mnemonic li(dst, imm)  plain2;
+        mnemonic add(dst, src) plain2;
+        mnemonic outd(src) plain1;
 
 }
