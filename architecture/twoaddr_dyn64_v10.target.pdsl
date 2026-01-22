@@ -25,6 +25,10 @@ architecture twoaddr_dyn64_v10 {
 		storage ip [32];       // instruction pointer (byte address in CODE)
 		storage status [32];   // 0 = OK, non-zero = trap
 
+		// flags (added)
+		storage zf [32];       // zero flag
+		storage sf [32];       // sign flag
+
 		// 64-bit storages for tagged values
 		storage r0st [64];
 		storage r1st [64];
@@ -51,7 +55,7 @@ architecture twoaddr_dyn64_v10 {
 		storage t2 [64];
 		storage t3 [64];
 
-		// IO (optional, for later)
+		// IO
 		storage ioport [8];
 		storage rin [8];
 		storage rout [8];
@@ -71,6 +75,7 @@ architecture twoaddr_dyn64_v10 {
 
 instructions:
 
+    // ---- encodings ----
     encode reg4 field = register {
         r0 = 0000,
         r1 = 0001,
@@ -114,118 +119,149 @@ instructions:
 
         ip = ip + 4;
     };
-// outd src : print signed payload as decimal ASCII to rout, then '\n'
-instruction outd = { 0110 0010, reg4 as src, 0000, 0000 0000 0000 0000 } {
-    // 1) extract signed payload (56-bit signed)
-    t0 = src;
-    t0 = t0 & 0x00ffffffffffffff;
-    t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;  // sign-extend 56 -> 64
-
-    // 2) handle sign
-    t1 = 0;                  // neg flag
-    if t0 < 0 then {
-        t1 = 1;
-        t0 = 0 - t0;         // abs
-    }
-
-    // 3) if negative, print '-'
-    if t1 != 0 then {
-        rout = 45;           // '-'
-    }
-
-    // 4) print number (0..65535 supported here)
-    // Special case: 0
-    if t0 == 0 then {
-        rout = 48;           // '0'
-        rout = 10;           // '\n'
-        ip = ip + 4;
-    } else {
-        // We will output digits from highest place to lowest without loops,
-        // using divisions by 10000,1000,100,10.
-        // Limitation: values > 65535 will print more digits incorrectly (by truncation).
-        // For your test 12 it's perfect.
-
-        // d4 = t0 / 10000; t0 = t0 % 10000
-        t2 = t0 / 10000;
-        t0 = t0 - (t2 * 10000);
-
-        // d3 = t0 / 1000; ...
-        t3 = t0 / 1000;
-        t0 = t0 - (t3 * 1000);
-
-        // d2 = t0 / 100
-        // reuse t4 by using status? no; we have only t0..t3. We'll reuse t2 after it's printed.
-        // We'll print with a "started" flag in status? Better: use status as temp? Don't.
-        // We'll use t1 as "started flag" now (it was neg flag, already used)
-        t1 = 0; // started=0
-
-        // print d4 if nonzero
-        if t2 != 0 then {
-            rout = t2 + 48;
-            t1 = 1;
-        }
-
-        // print d3 if started or nonzero
-        if (t1 != 0) | (t3 != 0) then {
-            rout = t3 + 48;
-            t1 = 1;
-        }
-
-        // compute d2
-        t2 = t0 / 100;
-        t0 = t0 - (t2 * 100);
-
-        if (t1 != 0) | (t2 != 0) then {
-            rout = t2 + 48;
-            t1 = 1;
-        }
-
-        // compute d1
-        t2 = t0 / 10;
-        t0 = t0 - (t2 * 10);
-
-        if (t1 != 0) | (t2 != 0) then {
-            rout = t2 + 48;
-            t1 = 1;
-        }
-
-        // last digit d0 in t0
-        rout = t0 + 48;
-
-        // newline
-        rout = 10;
-
-        ip = ip + 4;
-    }
-};
-
-
-
 
     // ---- arithmetic ----
     instruction add = { 0100 0000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
         t0 = src;
         t1 = dst;
 
+        // check src tag
         t2 = (t0 >> 56) & 0xff;
         t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
         if t3 != 0 then ip = ip; else { status = 1; }
 
+        // check dst tag
         t2 = (t1 >> 56) & 0xff;
         t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
         if t3 != 0 then ip = ip; else { status = 1; }
 
+        // decode signed 56-bit payloads
         t0 = t0 & 0x00ffffffffffffff;
         t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
 
         t1 = t1 & 0x00ffffffffffffff;
         t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
 
+        // add and repack TAG_INT
         t1 = t1 + t0;
         t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
 
         dst = t1;
         ip = ip + 4;
+    };
+
+    // ---- compare + flags (added) ----
+    // cmp a, b : sets zf/sf according to (a - b) on signed payloads
+    instruction cmp = { 0101 0000, reg4 as a, reg4 as b, 0000 0000 0000 0000 } {
+        // decode a
+        t0 = a & 0x00ffffffffffffff;
+        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+
+        // decode b
+        t1 = b & 0x00ffffffffffffff;
+        t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+
+        // diff = a - b
+        t2 = t0 - t1;
+
+        // flags
+        if t2 == 0 then zf = 1; else zf = 0;
+        if t2 < 0 then sf = 1; else sf = 0;
+
+        ip = ip + 4;
+    };
+
+    // ---- jumps (added) ----
+    // encoding: opcode(1) + pad(1) + imm16(2)
+    instruction jmp = { 0111 0000, 0000 0000, imm16 as target } {
+        ip = target;
+    };
+
+    instruction jz = { 0111 0001, 0000 0000, imm16 as target } {
+        if zf != 0 then ip = target; else ip = ip + 4;
+    };
+
+    instruction jnz = { 0111 0010, 0000 0000, imm16 as target } {
+        if zf == 0 then ip = target; else ip = ip + 4;
+    };
+
+    // ---- output decimal (added) ----
+    // outd src : print signed payload as decimal ASCII to rout, then '\n'
+    // NOTE: decimal printing supports 0..65535 (and negatives in that range)
+    instruction outd = { 0110 0010, reg4 as src, 0000, 0000 0000 0000 0000 } {
+        // extract signed payload (56-bit signed)
+        t0 = src;
+        t0 = t0 & 0x00ffffffffffffff;
+        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;  // sign-extend 56 -> 64
+
+        // handle sign
+        t1 = 0;                  // neg flag
+        if t0 < 0 then {
+            t1 = 1;
+            t0 = 0 - t0;         // abs
+        }
+
+        // print '-'
+        if t1 != 0 then {
+            rout = 45;           // '-'
+        }
+
+        // Special case: 0
+        if t0 == 0 then {
+            rout = 48;           // '0'
+            rout = 10;           // '\n'
+            ip = ip + 4;
+        } else {
+            // print number (0..65535)
+            // d4 = t0 / 10000; t0 %= 10000
+            t2 = t0 / 10000;
+            t0 = t0 - (t2 * 10000);
+
+            // d3 = t0 / 1000; t0 %= 1000
+            t3 = t0 / 1000;
+            t0 = t0 - (t3 * 1000);
+
+            // started flag (reuse t1)
+            t1 = 0;
+
+            // print d4 if nonzero
+            if t2 != 0 then {
+                rout = t2 + 48;
+                t1 = 1;
+            }
+
+            // print d3 if started or nonzero
+            if (t1 != 0) | (t3 != 0) then {
+                rout = t3 + 48;
+                t1 = 1;
+            }
+
+            // d2 = t0 / 100; t0 %= 100
+            t2 = t0 / 100;
+            t0 = t0 - (t2 * 100);
+
+            if (t1 != 0) | (t2 != 0) then {
+                rout = t2 + 48;
+                t1 = 1;
+            }
+
+            // d1 = t0 / 10; t0 %= 10
+            t2 = t0 / 10;
+            t0 = t0 - (t2 * 10);
+
+            if (t1 != 0) | (t2 != 0) then {
+                rout = t2 + 48;
+                t1 = 1;
+            }
+
+            // last digit d0 = t0
+            rout = t0 + 48;
+
+            // newline
+            rout = 10;
+
+            ip = ip + 4;
+        }
     };
 
     mnemonics:
@@ -239,6 +275,13 @@ instruction outd = { 0110 0010, reg4 as src, 0000, 0000 0000 0000 0000 } {
         mnemonic mov(dst, src) plain2;
         mnemonic li(dst, imm)  plain2;
         mnemonic add(dst, src) plain2;
-        mnemonic outd(src) plain1;
+
+        mnemonic cmp(a, b)     plain2;
+
+        mnemonic jmp(target)   plain1;
+        mnemonic jz(target)    plain1;
+        mnemonic jnz(target)   plain1;
+
+        mnemonic outd(src)     plain1;
 
 }
