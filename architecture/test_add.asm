@@ -1,15 +1,14 @@
 [section code, code]
 start:
-    li r0, 7
-    li r1, 7
-    cmp r0, r1
-    jz equal
-
-    li r0, 0
+    li r0, 5
+loop:
     outd r0
-    hlt
-
-equal:
-    li r0, 1
-    outd r0
+    li r1, 1
+    sub r0, r1
+    li r2, 0
+    cmp r0, r2
+    jz done
+    jn done
+    jmp loop
+done:
     hlt
