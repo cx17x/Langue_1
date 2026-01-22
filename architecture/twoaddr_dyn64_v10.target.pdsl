@@ -1,44 +1,49 @@
+// twoaddr_dyn64_v10: dynamic tagged 64-bit, 2-operand ISA, fixed 4-byte instructions
 architecture twoaddr_dyn64_v10 {
 
 	/*
-		Variant 10:
-		  - typing: dynamic (value-place holds the type of last assigned value)
-		  - instruction format: two-address
-		  - memory banks: code+constants, data
-		  - IO: via hidden register as port selector
+		Variant requirements (v10):
+		  - typing: dynamic (values are 64-bit tagged)
+		  - instruction format: two-address (dst = dst op src)
+		  - memory banks: code + data
+		  - MVP: add + mov + li + hlt
 
-		Dynamic value representation (tagged 64-bit value TV):
+		Tagged Value (TV), 64-bit:
 		  TV[63:56] = tag
 		  TV[55:0]  = payload
 
-		Tags used by ALU (numeric-only ops accept these):
-		  TAG_BOOL = 0x01
-		  TAG_INT  = 0x02
-		  TAG_UINT = 0x03
-		  TAG_CHAR = 0x04
+		Tags (same idea as stackdyn64):
+		  TAG_BOOL = 0x01  => 0x0100000000000000
+		  TAG_INT  = 0x02  => 0x0200000000000000
 
-		Notes:
-		  - DATA memory stores full tagged values.
-		  - Two-address ops use rd as both source and destination: rd = rd OP rs.
-		  - For numeric ops, non-numeric tags set STATUS and halt by not advancing IP.
+		For MVP:
+		  - li loads a TAG_INT from imm16 (sign-extended to 56-bit payload)
+		  - add assumes numeric tags (BOOL/INT/UINT/CHAR), decodes payload as signed, packs TAG_INT
 	*/
 
 	registers:
+		storage ip [32];       // instruction pointer (byte address in CODE)
+		storage status [32];   // 0 = OK, non-zero = trap
 
-		storage ip [32];       // instruction pointer (byte address in CODE space)
-		storage sp [32];       // stack pointer (byte address in DATA space, grows down)
-		storage bp [32];       // base/frame pointer for call frames (in DATA space)
-		storage status [32];   // 0 = OK, non-zero = runtime trap
+		// 64-bit storages for tagged values
+		storage r0st [64];
+		storage r1st [64];
+		storage r2st [64];
+		storage r3st [64];
+		storage r4st [64];
+		storage r5st [64];
+		storage r6st [64];
+		storage r7st [64];
 
-		// general purpose registers
-		storage r0 [64];
-		storage r1 [64];
-		storage r2 [64];
-		storage r3 [64];
-		storage r4 [64];
-		storage r5 [64];
-		storage r6 [64];
-		storage r7 [64];
+		// expose architectural register names for "register" operand encoding
+		view r0 = r0st;
+		view r1 = r1st;
+		view r2 = r2st;
+		view r3 = r3st;
+		view r4 = r4st;
+		view r5 = r5st;
+		view r6 = r6st;
+		view r7 = r7st;
 
 		// temporaries
 		storage t0 [64];
@@ -46,16 +51,14 @@ architecture twoaddr_dyn64_v10 {
 		storage t2 [64];
 		storage t3 [64];
 
-		// hidden IO port selector
+		// IO (optional, for later)
 		storage ioport [8];
-		// external device interface (environment-defined)
 		storage rin [8];
 		storage rout [8];
 
 	memory:
-
-		range codeMem [0x0000 .. 0xffff] {
-			cell = 1;
+		range code [0x0000 .. 0xffff] {
+			cell = 8;
 			endianess = little-endian;
 			granularity = 1;
 		}
@@ -66,540 +69,102 @@ architecture twoaddr_dyn64_v10 {
 			granularity = 1;
 		}
 
-	instructions:
+instructions:
+
+    encode reg4 field = register {
+        r0 = 0000,
+        r1 = 0001,
+        r2 = 0010,
+        r3 = 0011,
+        r4 = 0100,
+        r5 = 0101,
+        r6 = 0110,
+        r7 = 0111
+    };
+
+    encode imm16 field = immediate [16];
+
+    // ---- control ----
+    // 4 bytes: opcode(1) + 24 bits padding
+    instruction nop = { 0000 0000, 0000 0000 0000 0000 0000 0000 } {
+        ip = ip + 4;
+    };
+
+    instruction hlt = { 0000 0001, 0000 0000 0000 0000 0000 0000 } {
+        // stop execution
+    };
+
+    // ---- moves / immediates ----
+    // mov dst, src : opcode(1) + dst(4) + src(4) + 16 bits padding
+    instruction mov = { 0010 0000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        dst = src;
+        ip = ip + 4;
+    };
+
+    // li dst, imm16 : opcode(1) + dst(4) + pad4(0000) + imm16(2 bytes)
+    instruction li = { 0010 0001, reg4 as dst, 0000, imm16 as imm } {
+        // sign-extend 16 -> 64
+        t0 = imm;
+        t0 = t0 ^ 0x8000;
+        t0 = t0 - 0x8000;
+
+        // pack TAG_INT (payload 56-bit)
+        t0 = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
+        dst = t0;
+
+        ip = ip + 4;
+    };
+    // outb src : печатает младший байт payload как символ (1 байт в rout)
+    instruction outb = { 0110 0000, reg4 as src, 0000, 0000 0000 0000 0000 } {
+        t0 = src;
+        // берём payload и младший байт
+        t0 = t0 & 0x00ffffffffffffff;
+        t0 = t0 & 0xff;
+        rout = t0;      // VM обычно выводит это как stdout
+        ip = ip + 4;
+    };
+
+
+
+    // ---- arithmetic ----
+    instruction add = { 0100 0000, reg4 as dst, reg4 as src, 0000 0000 0000 0000 } {
+        t0 = src;
+        t1 = dst;
+
+        t2 = (t0 >> 56) & 0xff;
+        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+        if t3 != 0 then ip = ip; else { status = 1; }
+
+        t2 = (t1 >> 56) & 0xff;
+        t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
+        if t3 != 0 then ip = ip; else { status = 1; }
+
+        t0 = t0 & 0x00ffffffffffffff;
+        t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
+
+        t1 = t1 & 0x00ffffffffffffff;
+        t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
+
+        t1 = t1 + t0;
+        t1 = 0x0200000000000000 | (t1 & 0x00ffffffffffffff);
+
+        dst = t1;
+        ip = ip + 4;
+    };
+
+mnemonics:
+    format plain0 is "";
+    format plain1 is "{1}";
+    format plain2 is "{1}, {2}";
+
+    mnemonic nop() plain0;
+    mnemonic hlt() plain0;
+
+    mnemonic mov(dst, src) plain2;
+    mnemonic li(dst, imm)  plain2;
+    mnemonic add(dst, src) plain2;
+
+    mnemonic outb(src) plain1;
 
-		encode reg8  field = register {
-			r0 = 0000 0000,
-			r1 = 0000 0001,
-			r2 = 0000 0010,
-			r3 = 0000 0011,
-			r4 = 0000 0100,
-			r5 = 0000 0101,
-			r6 = 0000 0110,
-			r7 = 0000 0111,
-			sp = 0000 1000,
-			bp = 0000 1001,
-			ip = 0000 1010,
-			status = 0000 1011,
-			t0 = 0000 1100,
-			t1 = 0000 1101,
-			t2 = 0000 1110,
-			t3 = 0000 1111
-		};
-		encode imm8  field = immediate [8];
-		encode imm16 field = immediate [16];
-		encode imm32 field = immediate [32];
-		encode imm64 field = immediate [64];
 
-		// -------- control / termination --------
-
-		instruction nop = { 0000 0000 } {
-			ip = ip + 1;
-		};
-
-		instruction hlt = { 0000 0001 } {
-			// stop execution
-		};
-
-		// absolute unconditional jump
-		instruction jmp = { 0001 0000, imm16 as target } {
-			ip = target;
-		};
-
-		// jump if reg payload == 0 (false)
-		instruction jz = { 0001 0001, reg8 as cond, imm16 as target } {
-			t0 = cond & 0x00ffffffffffffff;
-			if t0 != 0 then
-				ip = ip + 4;
-			else
-				ip = target;
-		};
-
-		// jump if reg payload != 0 (true)
-		instruction jnz = { 0001 0010, reg8 as cond, imm16 as target } {
-			t0 = cond & 0x00ffffffffffffff;
-			if t0 != 0 then
-				ip = target;
-			else
-				ip = ip + 4;
-		};
-
-		// call absolute; pushes (return_ip) and (old_bp) onto DATA stack
-		instruction call = { 0001 0011, imm16 as target } {
-			sp = sp - 8;
-			dataMem:8[sp] = ip + 3;     // return address
-			sp = sp - 8;
-			dataMem:8[sp] = bp;         // save caller bp
-			bp = sp;                    // new frame base
-			ip = target;
-		};
-
-		// return from call; return value should be at [bp + 16]
-		instruction ret = { 0001 0100 } {
-			t0 = dataMem:8[bp];         // old bp
-			ip = dataMem:8[bp + 8];     // return ip
-			sp = bp + 16;               // drop frame, leave return value at top
-			bp = t0;
-		};
-
-		// -------- stack / data movement / constants --------
-
-		// initialize SP (use before first PUSH). value is DATA-space byte address.
-		instruction ldsp = { 0001 0110, imm16 as value } {
-			sp = value;
-			ip = ip + 3;
-		};
-
-		// initialize BP (optional). value is DATA-space byte address.
-		instruction ldbp = { 0001 0111, imm16 as value } {
-			bp = value;
-			ip = ip + 3;
-		};
-
-		// move between registers
-		instruction mov = { 0001 1000, reg8 as rd, reg8 as rs } {
-			rd = rs;
-			ip = ip + 3;
-		};
-
-		// load 64-bit tagged constant
-		instruction ldi = { 0001 1001, reg8 as rd, imm64 as value } {
-			rd = value;
-			ip = ip + 10;
-		};
-
-		// push register to stack
-		instruction push = { 0001 1010, reg8 as rs } {
-			sp = sp - 8;
-			dataMem:8[sp] = rs;
-			ip = ip + 2;
-		};
-
-		// pop stack to register
-		instruction pop = { 0001 1011, reg8 as rd } {
-			rd = dataMem:8[sp];
-			sp = sp + 8;
-			ip = ip + 2;
-		};
-
-		// load tagged value from DATA: rd = data[rs_payload]
-		instruction load = { 0010 0000, reg8 as rd, reg8 as rs } {
-			t0 = rs & 0x00ffffffffffffff;
-			rd = dataMem:8[t0];
-			ip = ip + 3;
-		};
-
-		// store tagged value into DATA: data[addr_payload] = rs
-		instruction store = { 0010 0001, reg8 as rs, reg8 as addr } {
-			t0 = addr & 0x00ffffffffffffff;
-			dataMem:8[t0] = rs;
-			ip = ip + 3;
-		};
-
-		// load local/arg from stack frame: rd = data[bp + disp]
-		instruction ldfp = { 0010 0010, reg8 as rd, imm16 as disp } {
-			t0 = disp;
-			t0 = t0 ^ 0x8000;
-			t0 = t0 - 0x8000;
-			t1 = (bp + t0) & 0xffff;
-			rd = dataMem:8[t1];
-			ip = ip + 4;
-		};
-
-		// store local/arg into stack frame: data[bp + disp] = rs
-		instruction stfp = { 0010 0011, reg8 as rs, imm16 as disp } {
-			t0 = disp;
-			t0 = t0 ^ 0x8000;
-			t0 = t0 - 0x8000;
-			t1 = (bp + t0) & 0xffff;
-			dataMem:8[t1] = rs;
-			ip = ip + 4;
-		};
-
-		// -------- arithmetic / logical (dynamic) --------
-
-		instruction add = { 0100 0000, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = t0 + t1;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 3;
-		};
-
-		instruction sub = { 0100 0001, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = t0 - t1;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 3;
-		};
-
-		instruction mul = { 0100 0010, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = t0 * t1;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 3;
-		};
-
-		instruction div = { 0100 0011, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t3 = (t1 == 0);
-			if t3 != 0 then {
-			status = 2;
-		} else {
-			ip = ip;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = t0 / t1;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 3;
-		};
-
-		instruction mod = { 0100 0100, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t3 = (t1 == 0);
-			if t3 != 0 then {
-			status = 2;
-		} else {
-			ip = ip;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = t0 % t1;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 3;
-		};
-
-		// comparisons: result is TAG_BOOL
-		instruction eq = { 0100 1000, reg8 as rd, reg8 as rs } {
-			t0 = (rd == rs);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction neq = { 0100 1001, reg8 as rd, reg8 as rs } {
-			t0 = (rd != rs);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction lt = { 0100 1010, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = (t0 < t1);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction gt = { 0100 1011, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = (t0 > t1);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction le = { 0100 1100, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = (t0 <= t1);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction ge = { 0100 1101, reg8 as rd, reg8 as rs } {
-			t0 = rd;
-			t1 = rs;
-			t2 = (t0 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t2 = (t1 >> 56) & 0xff;
-			t3 = ((t2 == 0x01) | (t2 == 0x02) | (t2 == 0x03) | (t2 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t1 = t1 & 0x00ffffffffffffff;
-			t1 = (t1 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = (t0 >= t1);
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		// logical AND/OR: truthy if payload != 0; result TAG_BOOL
-		instruction land = { 0100 1110, reg8 as rd, reg8 as rs } {
-			t0 = ( (rd & 0x00ffffffffffffff) != 0 ) && ( (rs & 0x00ffffffffffffff) != 0 );
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction lor = { 0100 1111, reg8 as rd, reg8 as rs } {
-			t0 = ( (rd & 0x00ffffffffffffff) != 0 ) || ( (rs & 0x00ffffffffffffff) != 0 );
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 3;
-		};
-
-		instruction lnot = { 0101 0000, reg8 as rd } {
-			t0 = ( (rd & 0x00ffffffffffffff) == 0 );
-			rd = 0x0100000000000000 | (t0 & 1);
-			ip = ip + 2;
-		};
-
-		instruction neg = { 0101 0001, reg8 as rd } {
-			t0 = rd;
-			t1 = (t0 >> 56) & 0xff;
-			t3 = ((t1 == 0x01) | (t1 == 0x02) | (t1 == 0x03) | (t1 == 0x04));
-			if t3 != 0 then
-			ip = ip;
-		else {
-			status = 1;
-		}
-
-			t0 = t0 & 0x00ffffffffffffff;
-			t0 = (t0 ^ 0x0080000000000000) - 0x0080000000000000;
-			t0 = 0 - t0;
-			rd = 0x0200000000000000 | (t0 & 0x00ffffffffffffff);
-			ip = ip + 2;
-		};
-
-		// -------- IO via hidden port selector --------
-
-		// set hidden IO port register
-		instruction setio = { 0110 0000, imm8 as port } {
-			ioport = port;
-			ip = ip + 2;
-		};
-
-		// IN: read byte from current port; rd = TAG_INT payload=rin
-		instruction inb = { 0110 0001, reg8 as rd } {
-			rd = 0x0200000000000000 | (rin & 0xff);
-			ip = ip + 2;
-		};
-
-		// OUT: write low byte of rs to current port
-		instruction outb = { 0110 0010, reg8 as rs } {
-			rout = rs & 0xff;
-			ip = ip + 2;
-		};
-
-	mnemonics:
-
-		format plain0 is "";
-		format plain1 is "{1}";
-		format plain2 is "{1}, {2}";
-
-		mnemonic nop() plain0;
-		mnemonic hlt() plain0;
-
-		mnemonic jmp(target) plain1;
-		mnemonic jz(cond, target) plain2;
-		mnemonic jnz(cond, target) plain2;
-		mnemonic call(target) plain1;
-		mnemonic ret() plain0;
-
-		mnemonic ldsp(value) plain1;
-		mnemonic ldbp(value) plain1;
-
-		mnemonic mov(rd, rs) plain2;
-		mnemonic ldi(rd, value) plain2;
-		mnemonic push(rs) plain1;
-		mnemonic pop(rd) plain1;
-
-		mnemonic load(rd, rs) plain2;
-		mnemonic store(rs, addr) plain2;
-		mnemonic ldfp(rd, disp) plain2;
-		mnemonic stfp(rs, disp) plain2;
-
-		mnemonic add(rd, rs) plain2;
-		mnemonic sub(rd, rs) plain2;
-		mnemonic mul(rd, rs) plain2;
-		mnemonic div(rd, rs) plain2;
-		mnemonic mod(rd, rs) plain2;
-
-		mnemonic eq(rd, rs) plain2;
-		mnemonic neq(rd, rs) plain2;
-		mnemonic lt(rd, rs) plain2;
-		mnemonic gt(rd, rs) plain2;
-		mnemonic le(rd, rs) plain2;
-		mnemonic ge(rd, rs) plain2;
-
-		mnemonic land(rd, rs) plain2;
-		mnemonic lor(rd, rs) plain2;
-		mnemonic lnot(rd) plain1;
-		mnemonic neg(rd) plain1;
-
-		mnemonic setio(port) plain1;
-		mnemonic inb(rd) plain1;
-		mnemonic outb(rs) plain1;
 }

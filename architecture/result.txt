@@ -1,0 +1,8 @@
+Executing...
+  EXE:        ./out_local.ptptb
+  ARC_FILE:   /Users/nikiktakovalev/Langue_1/architecture/twoaddr_dyn64_v10.target.pdsl
+  ARCH:       twoaddr_dyn64_v10
+  CODE_BANK:  code
+abort_threads: Failed aborting id: 0x17085b000, mono_thread_manage will ignore it
+
+Done.

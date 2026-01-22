@@ -1,0 +1,2 @@
+C:\RemoteTasks.Workspace\Sessions\AssembleDebug_e3f712ba-9df6-402f-8c62-98c0c3d8529b\workdir\In\twoaddr_dyn64_v10.target.pdsl(73,32): Unexpected token "["; expected: {
+Error: Architecture 'twoaddr_dyn64_v10' definition not collected.
