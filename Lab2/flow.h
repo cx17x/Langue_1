@@ -16,6 +16,66 @@ typedef struct TextList {
   int cap_lines;
 } TextList;
 
+typedef enum FlowOpKind {
+  FLOW_OP_UNKNOWN,
+  FLOW_OP_ASSIGN,
+  FLOW_OP_EXPR,
+  FLOW_OP_CALL,
+  FLOW_OP_VARDECL,
+  FLOW_OP_COND,
+  FLOW_OP_RETURN,
+  FLOW_OP_LOOP,
+} FlowOpKind;
+
+typedef enum BinaryKind {
+  BIN_UNKNOWN,
+  BIN_ADD,
+  BIN_SUB,
+  BIN_MUL,
+  BIN_DIV,
+} BinaryKind;
+
+typedef enum CondKind {
+  CONDK_UNKNOWN,
+  CONDK_EQ,
+  CONDK_NE,
+  CONDK_LT,
+  CONDK_LE,
+  CONDK_GT,
+  CONDK_GE,
+} CondKind;
+
+typedef enum ExprKind {
+  EXPRK_UNKNOWN,
+  EXPRK_IDENTIFIER,
+  EXPRK_LITERAL,
+  EXPRK_COMPLEX,
+} ExprKind;
+
+typedef struct ExprInfo {
+  ExprKind kind;
+  char *text;
+  char *identifier;
+  char *literal;
+} ExprInfo;
+
+typedef struct FlowOperation {
+  FlowOpKind kind;
+  ExprInfo lhs;
+  ExprInfo rhs;
+  ExprInfo cond;
+  ExprInfo value;
+  ExprInfo bin_left;
+  ExprInfo bin_right;
+  ExprInfo cond_left;
+  ExprInfo cond_right;
+  char *call_name;
+  ExprInfo *call_args;
+  int n_call_args;
+  BinaryKind bin_kind;
+  CondKind cond_kind;
+} FlowOperation;
+
 typedef struct CFGNode {
   int id;
   char *label; /* printable label */
@@ -23,6 +83,9 @@ typedef struct CFGNode {
   IntList succ;
   char **succ_labels;
   TextList ops; /* textual statements */
+  FlowOperation **flow_ops;
+  int n_flow_ops;
+  int cap_flow_ops;
 } CFGNode;
 
 typedef struct CFG {
@@ -47,6 +110,7 @@ int cfg_add_node(CFG *c, const char *role);
 void cfg_add_edge(CFG *c, int from, int to, const char *label);
 void cfg_node_add_line(CFG *c, int node_id, const char *line);
 void cfg_node_add_line_owned(CFG *c, int node_id, char *line);
+void cfg_node_add_operation(CFG *c, int node_id, FlowOperation *op);
 
 // write dot
 void cfg_write_dot(CFG *c, FILE *f, const char *fname);

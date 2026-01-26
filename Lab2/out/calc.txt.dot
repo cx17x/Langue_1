@@ -1,0 +1,14 @@
+digraph G {
+  subgraph cluster_f0 {
+    label="function main";
+    file_calc_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_calc_txt_f0_n1 [shape=box,label="B1 (entry)\nExprStmt\n  expr: Call(send_byte) { Nop(Literal) [const:'1'] }\nExprStmt\n  expr: Call(send_byte) { Nop(Literal) [const:'\\n'] }"];
+    file_calc_txt_f0_n1 -> file_calc_txt_f0_n0;
+  }
+  subgraph cluster_f1 {
+    label="function send_byte";
+    file_calc_txt_f1_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_calc_txt_f1_n1 [shape=box,label="B1 (entry)\nempty"];
+    file_calc_txt_f1_n1 -> file_calc_txt_f1_n0;
+  }
+}

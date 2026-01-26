@@ -34,6 +34,291 @@ static void textlist_clear(TextList *t) {
   t->lines = NULL; t->n_lines = t->cap_lines = 0;
 }
 
+static char *strndup_trim(const char *start, size_t len) {
+  while (len > 0 && isspace((unsigned char)start[len-1])) len--;
+  while (len > 0 && isspace((unsigned char)*start)) { start++; len--; }
+  char *res = malloc(len + 1);
+  if (!res) return NULL;
+  memcpy(res, start, len);
+  res[len] = '\0';
+  return res;
+}
+
+static char *extract_field(const char *line, const char *field) {
+  if (!line || !field) return NULL;
+  const char *p = strstr(line, field);
+  if (!p) return NULL;
+  p += strlen(field);
+  while (*p && isspace((unsigned char)*p)) p++;
+  const char *end = p;
+  while (*end && *end != '\n' && *end != '\r') end++;
+  return strndup_trim(p, (size_t)(end - p));
+}
+
+static int token_length(const char *start, const char *end) {
+  const char *p = start;
+  while (p < end && *p && !isspace((unsigned char)*p) && *p != ']' && *p != '|' && *p != '}' && *p != ')' && *p != '{') p++;
+  return (int)(p - start);
+}
+
+static char *extract_token(const char *start, const char *end) {
+  while (start < end && isspace((unsigned char)*start)) start++;
+  int len = token_length(start, end);
+  return strndup_trim(start, len);
+}
+
+static ExprInfo expr_info_make(const char *text);
+
+static BinaryKind deduce_binary_kind(const char *line) {
+  if (!line) return BIN_UNKNOWN;
+  if (strstr(line, "AddExpr")) return BIN_ADD;
+  if (strstr(line, "SubExpr")) return BIN_SUB;
+  if (strstr(line, "MulExpr")) return BIN_MUL;
+  if (strstr(line, "DivExpr")) return BIN_DIV;
+  return BIN_UNKNOWN;
+}
+
+static void parse_binary_operands(FlowOperation *op, const char *line) {
+  if (!op || !line) return;
+  const char *start = strchr(line, '{');
+  const char *end = strrchr(line, '}');
+  if (!start || !end || end <= start) return;
+  const char *p = start + 1;
+  int depth = 0;
+  const char *sep = NULL;
+  for (; p < end; ++p) {
+    if (*p == '{') depth++;
+    else if (*p == '}') depth--;
+    else if (*p == '|' && depth == 0) { sep = p; break; }
+  }
+  if (!sep) return;
+  char *left = strndup_trim(start + 1, (size_t)(sep - start - 1));
+  char *right = strndup_trim(sep + 1, (size_t)(end - sep - 1));
+  if (left && *left) op->bin_left = expr_info_make(left);
+  if (right && *right) op->bin_right = expr_info_make(right);
+  free(left);
+  free(right);
+}
+
+static ExprInfo expr_info_make(const char *text) {
+  ExprInfo info = { EXPRK_UNKNOWN, NULL, NULL, NULL };
+  if (!text) return info;
+  info.text = strdup(text);
+  if (!info.text) return info;
+  const char *var_pos = strstr(info.text, "var:");
+  if (var_pos) {
+    const char *start = var_pos + 4;
+    const char *end = start;
+    while (*end && *end != '\n' && *end != '\r' && *end != ']' && *end != '}') end++;
+    info.identifier = strndup_trim(start, (size_t)(end - start));
+    if (info.identifier && *info.identifier) info.kind = EXPRK_IDENTIFIER;
+  }
+  const char *lit_pos = strstr(info.text, "const:");
+  if (lit_pos) {
+    const char *start = lit_pos + 6;
+    const char *end = start;
+    while (*end && *end != '\n' && *end != '\r' && *end != ']' && *end != '}') end++;
+    free(info.literal);
+    info.literal = strndup_trim(start, (size_t)(end - start));
+    if (info.literal && *info.literal) info.kind = EXPRK_LITERAL;
+  }
+  if (info.kind == EXPRK_UNKNOWN) info.kind = EXPRK_COMPLEX;
+  return info;
+}
+
+static void expr_info_free(ExprInfo *info) {
+  if (!info) return;
+  free(info->text); info->text = NULL;
+  free(info->identifier); info->identifier = NULL;
+  free(info->literal); info->literal = NULL;
+  info->kind = EXPRK_UNKNOWN;
+}
+
+static FlowOperation *flow_operation_new(FlowOpKind kind) {
+  FlowOperation *op = calloc(1, sizeof(FlowOperation));
+  if (!op) return NULL;
+  op->kind = kind;
+  op->cond_kind = CONDK_UNKNOWN;
+  op->bin_kind = BIN_UNKNOWN;
+  return op;
+}
+
+static void flow_operation_free(FlowOperation *op) {
+  if (!op) return;
+  expr_info_free(&op->lhs);
+  expr_info_free(&op->rhs);
+  expr_info_free(&op->cond);
+  expr_info_free(&op->value);
+  expr_info_free(&op->bin_left);
+  expr_info_free(&op->bin_right);
+  expr_info_free(&op->cond_left);
+  expr_info_free(&op->cond_right);
+  free(op->call_name);
+  if (op->call_args) {
+    for (int i=0;i<op->n_call_args;i++) expr_info_free(&op->call_args[i]);
+    free(op->call_args);
+  }
+  free(op);
+}
+
+static void flow_operation_add_call_arg(FlowOperation *op, const char *text) {
+  if (!op || !text) return;
+  ExprInfo arg = expr_info_make(text);
+  ExprInfo *tmp = realloc(op->call_args, sizeof(ExprInfo) * (op->n_call_args + 1));
+  if (!tmp) {
+    expr_info_free(&arg);
+    return;
+  }
+  op->call_args = tmp;
+  op->call_args[op->n_call_args++] = arg;
+}
+
+static CondKind deduce_cond_kind(const char *line) {
+  if (!line) return CONDK_UNKNOWN;
+  if (strstr(line, "Expr(!=)")) return CONDK_NE;
+  if (strstr(line, "Expr(<)")) return CONDK_LT;
+  if (strstr(line, "Expr(>)")) return CONDK_GT;
+  if (strstr(line, "Expr(<=)")) return CONDK_LE;
+  if (strstr(line, "Expr(>=)")) return CONDK_GE;
+  if (strstr(line, "Expr(=)")) return CONDK_EQ;
+  return CONDK_UNKNOWN;
+}
+
+static void parse_operands(ExprInfo *left, ExprInfo *right, const char *line) {
+  if (!line) return;
+  const char *start = strchr(line, '{');
+  const char *end = strrchr(line, '}');
+  if (!start || !end || end <= start) return;
+  const char *p = start + 1;
+  int depth = 0;
+  const char *sep = NULL;
+  for (; p < end; ++p) {
+    if (*p == '{') depth++;
+    else if (*p == '}') depth--;
+    else if (*p == '|' && depth == 0) {
+      sep = p;
+      break;
+    }
+  }
+  if (!sep) return;
+  char *l = strndup_trim(start + 1, (size_t)(sep - start - 1));
+  char *r = strndup_trim(sep + 1, (size_t)(end - sep - 1));
+  if (l && *l) *left = expr_info_make(l);
+  if (r && *r) *right = expr_info_make(r);
+  free(l);
+  free(r);
+}
+
+static void parse_call_args(FlowOperation *op, const char *line) {
+  const char *start = strchr(line, '{');
+  const char *end = start ? strchr(start, '}') : NULL;
+  if (!start || !end || end <= start) return;
+  const char *p = start + 1;
+  while (p < end) {
+    while (p < end && isspace((unsigned char)*p)) p++;
+    if (p >= end) break;
+    const char *sep = strchr(p, '|');
+    const char *term = sep && sep < end ? sep : end;
+    size_t len = (size_t)(term - p);
+    char *entry = strndup_trim(p, len);
+    if (entry && *entry) flow_operation_add_call_arg(op, entry);
+    free(entry);
+    if (sep && sep < end) p = sep + 1;
+    else break;
+  }
+}
+
+static char *parse_call_name(const char *line) {
+  const char *start = strstr(line, "Call(");
+  if (!start) return NULL;
+  start += 5;
+  const char *end = strchr(start, ')');
+  if (!end) return NULL;
+  return strndup_trim(start, (size_t)(end - start));
+}
+
+static FlowOperation *flow_operation_from_line(const char *line) {
+  if (!line) return NULL;
+  FlowOperation *op = flow_operation_new(FLOW_OP_UNKNOWN);
+  if (!op) return NULL;
+  if (strstr(line, "VarDecl(")) {
+    op->kind = FLOW_OP_VARDECL;
+    char *type = NULL;
+    const char *start = strchr(line, '(');
+    const char *end = start ? strchr(start, ')') : NULL;
+    if (start && end && end > start) type = strndup_trim(start + 1, (size_t)(end - start - 1));
+    char *var = extract_field(line, "var:");
+    if (var) {
+      expr_info_free(&op->lhs);
+      op->lhs = expr_info_make(var);
+      free(var);
+      if (op->lhs.identifier) op->lhs.kind = EXPRK_IDENTIFIER;
+    }
+    if (type) {
+      expr_info_free(&op->value);
+      op->value = expr_info_make(type);
+      free(type);
+    }
+  } else if (strstr(line, "Assign(")) {
+    op->kind = FLOW_OP_ASSIGN;
+    char *lhs = extract_field(line, "lhs:");
+    char *rhs = extract_field(line, "rhs:");
+    if (lhs) {
+      expr_info_free(&op->lhs);
+      op->lhs = expr_info_make(lhs);
+      free(lhs);
+    }
+    if (rhs) {
+      expr_info_free(&op->rhs);
+      op->rhs = expr_info_make(rhs);
+      free(rhs);
+    }
+    if (op->rhs.text && strstr(op->rhs.text, "BinaryOp(")) {
+      op->bin_kind = deduce_binary_kind(op->rhs.text);
+      if (op->bin_kind != BIN_UNKNOWN) parse_binary_operands(op, op->rhs.text);
+    }
+  } else if (strstr(line, "ExprStmt")) {
+    char *expr = extract_field(line, "expr:");
+    if (expr) {
+      op->kind = FLOW_OP_EXPR;
+      op->value = expr_info_make(expr);
+      free(expr);
+    }
+  } else if (strstr(line, "Return")) {
+    op->kind = FLOW_OP_RETURN;
+    char *val = extract_field(line, "value:");
+    if (val) {
+      op->value = expr_info_make(val);
+      free(val);
+    }
+  } else if (strstr(line, "IfCond") || strstr(line, "RepeatCond") || strstr(line, "WhileCond")) {
+    op->kind = FLOW_OP_COND;
+    char *expr = extract_field(line, "expr:");
+    if (expr) {
+      op->cond = expr_info_make(expr);
+      free(expr);
+    }
+  }
+  if (op->kind == FLOW_OP_COND && op->cond.text) {
+    op->cond_kind = deduce_cond_kind(op->cond.text);
+    if (op->cond_kind != CONDK_UNKNOWN) parse_operands(&op->cond_left, &op->cond_right, op->cond.text);
+  }
+  char *call_name = parse_call_name(line);
+  if (call_name) {
+    parse_call_args(op, line);
+    op->kind = FLOW_OP_CALL;
+    free(op->call_name);
+    op->call_name = call_name;
+  }
+  if (op->kind == FLOW_OP_UNKNOWN && !op->call_name &&
+      op->lhs.text == NULL && op->rhs.text == NULL &&
+      op->cond.text == NULL && op->value.text == NULL) {
+    flow_operation_free(op);
+    return NULL;
+  }
+  return op;
+}
+
 CFG *cfg_new(void) {
   CFG *c = malloc(sizeof(CFG));
   c->nodes = NULL; c->n_nodes = 0; c->cap_nodes = 0;
@@ -51,6 +336,10 @@ void cfg_free(CFG *c) {
       free(c->nodes[i].succ_labels);
     }
     intlist_free(&c->nodes[i].succ);
+    if (c->nodes[i].flow_ops) {
+      for (int j=0;j<c->nodes[i].n_flow_ops;j++) flow_operation_free(c->nodes[i].flow_ops[j]);
+      free(c->nodes[i].flow_ops);
+    }
   }
   free(c->nodes);
   free(c);
@@ -69,6 +358,9 @@ int cfg_add_node(CFG *c, const char *role) {
   intlist_init(&c->nodes[id].succ);
   c->nodes[id].succ_labels = NULL;
   textlist_init(&c->nodes[id].ops);
+  c->nodes[id].flow_ops = NULL;
+  c->nodes[id].n_flow_ops = 0;
+  c->nodes[id].cap_flow_ops = 0;
   return id;
 }
 
@@ -88,14 +380,39 @@ void cfg_add_edge(CFG *c, int from, int to, const char *label) {
   n->succ.n++;
 }
 
+static void cfg_node_add_operation_internal(CFG *c, int node_id, FlowOperation *op) {
+  if (!c || !op) return;
+  if (node_id < 0 || node_id >= c->n_nodes) { flow_operation_free(op); return; }
+  CFGNode *node = &c->nodes[node_id];
+  if (node->n_flow_ops + 1 > node->cap_flow_ops) {
+    int newcap = (node->cap_flow_ops == 0) ? 4 : node->cap_flow_ops * 2;
+    node->flow_ops = realloc(node->flow_ops, sizeof(FlowOperation*) * newcap);
+    node->cap_flow_ops = newcap;
+  }
+  node->flow_ops[node->n_flow_ops++] = op;
+}
+
+void cfg_node_add_operation(CFG *c, int node_id, FlowOperation *op) {
+  cfg_node_add_operation_internal(c, node_id, op);
+}
+
+static void maybe_add_operation(CFG *c, int node_id, const char *line) {
+  if (!c || !line) return;
+  FlowOperation *op = flow_operation_from_line(line);
+  if (!op) return;
+  cfg_node_add_operation_internal(c, node_id, op);
+}
+
 void cfg_node_add_line(CFG *c, int node_id, const char *line) {
   if (!c || node_id < 0 || node_id >= c->n_nodes) return;
   textlist_add(&c->nodes[node_id].ops, line);
+  maybe_add_operation(c, node_id, line);
 }
 
 void cfg_node_add_line_owned(CFG *c, int node_id, char *line) {
   if (!c || node_id < 0 || node_id >= c->n_nodes) { free(line); return; }
   textlist_add_owned(&c->nodes[node_id].ops, line);
+  maybe_add_operation(c, node_id, line);
 }
 
 static void dot_escape(FILE *f, const char *s) {

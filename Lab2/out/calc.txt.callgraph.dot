@@ -1,0 +1,5 @@
+digraph CallGraph {
+  "main";
+  "send_byte";
+  "main" -> "send_byte" [label="2"];
+}

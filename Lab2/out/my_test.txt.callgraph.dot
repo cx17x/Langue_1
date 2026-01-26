@@ -1,5 +1,0 @@
-digraph CallGraph {
-  "main";
-  "bubble_sort";
-  "main" -> "bubble_sort" [label="1"];
-}
