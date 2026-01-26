@@ -1,2 +1,3 @@
 caller,callee,count
-main,send_byte,2
+main,print_int,1
+print_uint,print_uint,1

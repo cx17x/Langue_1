@@ -1,5 +1,7 @@
 digraph CallGraph {
   "main";
-  "send_byte";
-  "main" -> "send_byte" [label="2"];
+  "print_int";
+  "print_uint";
+  "main" -> "print_int" [label="1"];
+  "print_uint" -> "print_uint" [label="1"];
 }
