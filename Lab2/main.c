@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <tree_sitter/api.h>
 #include "flow.h"
+#include "linear_code.h"
 
 static void dot_escape(FILE *out, const char *s) {
   for (; *s; ++s) {
@@ -151,17 +152,20 @@ static void collect_call_if_known(const char *callee, void *userdata) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "Usage: %s <input1.v2> [input2.v2 ...] [--outdir DIR]\n", argv[0]);
+    fprintf(stderr, "Usage: %s <input1.v2> [input2.v2 ...] [--outdir DIR] [--asmout FILE] [--emit-cfg]\n", argv[0]);
     return 1;
   }
 
   const char *outdir = NULL;
+  const char *asmout = "out.asm";
+  int emit_cfg = 0;
   // collect files
-  int first_files = 1;
   char **files = malloc(sizeof(char*) * (argc+1));
   int file_count = 0;
   for (int i=1;i<argc;i++){
     if (strcmp(argv[i], "--outdir") == 0 && i+1<argc) { outdir = argv[i+1]; i++; continue; }
+    if (strcmp(argv[i], "--asmout") == 0 && i+1<argc) { asmout = argv[i+1]; i++; continue; }
+    if (strcmp(argv[i], "--emit-cfg") == 0) { emit_cfg = 1; continue; }
     files[file_count++] = argv[i];
   }
   if (!outdir) outdir = ".";
@@ -177,6 +181,7 @@ int main(int argc, char **argv) {
     return 2;
   }
 
+  ProgramImage *image = program_image_new();
   for (int i=0;i<file_count;i++) {
     const char *path = files[i];
     size_t len = 0; char *source = read_file(path, &len);
@@ -251,89 +256,96 @@ int main(int argc, char **argv) {
       funcs[fi].meta.cfg = cfg;
     }
 
+    for (int fi=0; fi<func_n; fi++) {
+      if (funcs[fi].meta.cfg) program_image_add_function_from_cfg(image, &funcs[fi].meta);
+    }
 
+    if (emit_cfg) {
+      // prepare per-file DOT
+      char outfile[1024]; snprintf(outfile, sizeof(outfile), "%s/%s.dot", outdir, base);
+      FILE *of = fopen(outfile, "w");
+      if (!of) { fprintf(stderr, "Cannot write %s\n", outfile); }
+      else {
+        fprintf(of, "digraph G {\n");
+        // for each function, print subgraph with prefixed node names
+        for (int fi=0; fi<func_n; fi++) {
+          ProgramFunction *pf = &funcs[fi].meta;
+          CFG *cfg = pf->cfg;
+          if (!cfg) continue;
+          fprintf(of, "  subgraph cluster_f%d {\n", fi);
+          fprintf(of, "    label=\"function %s\";\n", pf->name);
+          // print nodes with prefix f<fi>_n<id>
+          for (int n=0;n<cfg->n_nodes;n++) {
+            fprintf(of, "    %s_f%d_n%d [shape=box,label=\"", prefix, fi, cfg->nodes[n].id);
+            dot_escape(of, cfg->nodes[n].label);
+            for (int ln=0; ln<cfg->nodes[n].ops.n_lines; ln++) {
+              fputs("\\n", of);
+              dot_escape(of, cfg->nodes[n].ops.lines[ln]);
+            }
+            fputs("\"];\n", of);
+          }
+          // print edges
+          for (int n=0;n<cfg->n_nodes;n++) {
+            for (int j=0;j<cfg->nodes[n].succ.n;j++) {
+              int to = cfg->nodes[n].succ.a[j];
+              char *lab = NULL;
+              if (cfg->nodes[n].succ_labels) lab = cfg->nodes[n].succ_labels[j];
+              if (lab) fprintf(of, "    %s_f%d_n%d -> %s_f%d_n%d [label=\"%s\"];\n", prefix, fi, n, prefix, fi, to, lab);
+              else fprintf(of, "    %s_f%d_n%d -> %s_f%d_n%d;\n", prefix, fi, n, prefix, fi, to);
+            }
+          }
+          fprintf(of, "  }\n");
+        }
+        fprintf(of, "}\n");
+        fclose(of);
+        printf("Wrote %s\n", outfile);
+      }
 
-    // prepare per-file DOT
-    char outfile[1024]; snprintf(outfile, sizeof(outfile), "%s/%s.dot", outdir, base);
-    FILE *of = fopen(outfile, "w");
-    if (!of) { fprintf(stderr, "Cannot write %s\n", outfile); }
-    else {
-      fprintf(of, "digraph G {\n");
-      // for each function, print subgraph with prefixed node names
+      // build call-graph based on Call(...) occurrences inside CFG nodes
+      Pair *pairs = NULL; int pair_cap=0, pair_n=0;
       for (int fi=0; fi<func_n; fi++) {
         ProgramFunction *pf = &funcs[fi].meta;
         CFG *cfg = pf->cfg;
         if (!cfg) continue;
-        fprintf(of, "  subgraph cluster_f%d {\n", fi);
-        fprintf(of, "    label=\"function %s\";\n", pf->name);
-        // print nodes with prefix f<fi>_n<id>
+        CallCollectorCtx ctx = { &pairs, &pair_n, &pair_cap, pf->name, all_func_names, all_fn_n };
         for (int n=0;n<cfg->n_nodes;n++) {
-          fprintf(of, "    %s_f%d_n%d [shape=box,label=\"", prefix, fi, cfg->nodes[n].id);
-          dot_escape(of, cfg->nodes[n].label);
           for (int ln=0; ln<cfg->nodes[n].ops.n_lines; ln++) {
-            fputs("\\n", of);
-            dot_escape(of, cfg->nodes[n].ops.lines[ln]);
-          }
-          fputs("\"];\n", of);
-        }
-        // print edges
-        for (int n=0;n<cfg->n_nodes;n++) {
-          for (int j=0;j<cfg->nodes[n].succ.n;j++) {
-            int to = cfg->nodes[n].succ.a[j];
-            char *lab = NULL;
-            if (cfg->nodes[n].succ_labels) lab = cfg->nodes[n].succ_labels[j];
-            if (lab) fprintf(of, "    %s_f%d_n%d -> %s_f%d_n%d [label=\"%s\"];\n", prefix, fi, n, prefix, fi, to, lab);
-            else fprintf(of, "    %s_f%d_n%d -> %s_f%d_n%d;\n", prefix, fi, n, prefix, fi, to);
+            scan_line_for_calls(cfg->nodes[n].ops.lines[ln], collect_call_if_known, &ctx);
           }
         }
-        fprintf(of, "  }\n");
       }
-      fprintf(of, "}\n");
-      fclose(of);
-      printf("Wrote %s\n", outfile);
+
+      // write callgraph
+      char callgraph_dot[1024];
+      char callgraph_csv[1024];
+      snprintf(callgraph_dot, sizeof(callgraph_dot), "%s/%s.callgraph.dot", outdir, base);
+      snprintf(callgraph_csv, sizeof(callgraph_csv), "%s/%s.callgraph.csv", outdir, base);
+      FILE *cf = fopen(callgraph_dot, "w");
+      if (cf) {
+        fprintf(cf, "digraph CallGraph {\n");
+        // unique nodes
+        for (int k=0;k<all_fn_n;k++) fprintf(cf, "  \"%s\";\n", all_func_names[k]);
+        for (int p=0;p<pair_n;p++) fprintf(cf, "  \"%s\" -> \"%s\" [label=\"%d\"];\n", pairs[p].caller, pairs[p].callee, pairs[p].count);
+        fprintf(cf, "}\n"); fclose(cf); printf("Wrote %s\n", callgraph_dot);
+
+        // write CSV
+        FILE *csv = fopen(callgraph_csv, "w");
+        if (csv) {
+          fprintf(csv, "caller,callee,count\n");
+          for (int p=0;p<pair_n;p++) fprintf(csv, "%s,%s,%d\n", pairs[p].caller, pairs[p].callee, pairs[p].count);
+          fclose(csv);
+          printf("Wrote %s\n", callgraph_csv);
+        } else fprintf(stderr, "Cannot write %s\n", callgraph_csv);
+      } else fprintf(stderr, "Cannot write callgraph %s\n", callgraph_dot);
+
+      // free pairs
+      for (int p=0;p<pair_n;p++) { free(pairs[p].caller); free(pairs[p].callee); }
+      free(pairs);
+      for (int k=0;k<all_fn_n;k++) free(all_func_names[k]); free(all_func_names);
+    } else {
+      for (int k=0;k<all_fn_n;k++) free(all_func_names[k]);
+      free(all_func_names);
     }
-
-    // build call-graph based on Call(...) occurrences inside CFG nodes
-    Pair *pairs = NULL; int pair_cap=0, pair_n=0;
-    for (int fi=0; fi<func_n; fi++) {
-      ProgramFunction *pf = &funcs[fi].meta;
-      CFG *cfg = pf->cfg;
-      if (!cfg) continue;
-      CallCollectorCtx ctx = { &pairs, &pair_n, &pair_cap, pf->name, all_func_names, all_fn_n };
-      for (int n=0;n<cfg->n_nodes;n++) {
-        for (int ln=0; ln<cfg->nodes[n].ops.n_lines; ln++) {
-          scan_line_for_calls(cfg->nodes[n].ops.lines[ln], collect_call_if_known, &ctx);
-        }
-      }
-    }
-
-    // write callgraph
-    char callgraph_dot[1024];
-    char callgraph_csv[1024];
-    snprintf(callgraph_dot, sizeof(callgraph_dot), "%s/%s.callgraph.dot", outdir, base);
-    snprintf(callgraph_csv, sizeof(callgraph_csv), "%s/%s.callgraph.csv", outdir, base);
-    FILE *cf = fopen(callgraph_dot, "w");
-    if (cf) {
-      fprintf(cf, "digraph CallGraph {\n");
-      // unique nodes
-      for (int k=0;k<all_fn_n;k++) fprintf(cf, "  \"%s\";\n", all_func_names[k]);
-      for (int p=0;p<pair_n;p++) fprintf(cf, "  \"%s\" -> \"%s\" [label=\"%d\"];\n", pairs[p].caller, pairs[p].callee, pairs[p].count);
-      fprintf(cf, "}\n"); fclose(cf); printf("Wrote %s\n", callgraph_dot);
-
-      // write CSV
-      FILE *csv = fopen(callgraph_csv, "w");
-      if (csv) {
-        fprintf(csv, "caller,callee,count\n");
-        for (int p=0;p<pair_n;p++) fprintf(csv, "%s,%s,%d\n", pairs[p].caller, pairs[p].callee, pairs[p].count);
-        fclose(csv);
-        printf("Wrote %s\n", callgraph_csv);
-      } else fprintf(stderr, "Cannot write %s\n", callgraph_csv);
-    } else fprintf(stderr, "Cannot write callgraph %s\n", callgraph_dot);
-
-    // free pairs
-    for (int p=0;p<pair_n;p++) { free(pairs[p].caller); free(pairs[p].callee); }
-    free(pairs);
-    for (int k=0;k<all_fn_n;k++) free(all_func_names[k]); free(all_func_names);
 
     // cleanup
     for (int fi=0; fi<func_n; fi++) {
@@ -351,5 +363,16 @@ int main(int argc, char **argv) {
 
   ts_parser_delete(parser);
   free(files);
+  if (image) {
+    FILE *asm_file = fopen(asmout, "w");
+    if (!asm_file) {
+      fprintf(stderr, "Cannot write %s\n", asmout);
+    } else {
+      program_image_write_asm(image, asm_file);
+      fclose(asm_file);
+      printf("Wrote %s\n", asmout);
+    }
+    program_image_free(image);
+  }
   return 0;
 }
