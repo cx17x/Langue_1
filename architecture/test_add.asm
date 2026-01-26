@@ -2,19 +2,24 @@
 start:
   ldsp 0xfff0
   ldbp 0xfff0
-
   call calc_txt_main
   hlt
-
 ; function calc_txt_main
 calc_txt_main:
-  li r0, 49        ; '1'
+; CALL send_byte
+; Nop(Literal) [const:'1']
+  li r0, 49
   call calc_txt_send_byte
-  li r0, 10        ; '\n'
+; CALL send_byte
+; Nop(Literal) [const:'\n']
+  li r0, 10
   call calc_txt_send_byte
+calc_txt_main_end:
   ret
 
 ; function calc_txt_send_byte
 calc_txt_send_byte:
+; empty
+calc_txt_send_byte_end:
   outb r0
   ret

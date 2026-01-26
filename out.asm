@@ -4,7 +4,6 @@ start:
   ldbp 0xfff0
   call calc_txt_main
   hlt
-.text
 ; function calc_txt_main
 calc_txt_main:
 ; CALL send_byte

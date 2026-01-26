@@ -45,6 +45,7 @@ typedef struct EmitContext {
   int n;
   int cap;
   int next;
+  char *file_prefix;
 } EmitContext;
 
 static const char *scratch_reg = "r5";
@@ -57,6 +58,7 @@ static void emit_context_init(EmitContext *ctx) {
   ctx->n = 0;
   ctx->cap = 0;
   ctx->next = 0;
+  ctx->file_prefix = NULL;
 }
 
 static void emit_context_free(EmitContext *ctx) {
@@ -65,6 +67,8 @@ static void emit_context_free(EmitContext *ctx) {
   free(ctx->entries);
   ctx->entries = NULL;
   ctx->n = ctx->cap = ctx->next = 0;
+  free(ctx->file_prefix);
+  ctx->file_prefix = NULL;
 }
 
 static const char *lookup_var_reg(const EmitContext *ctx, const char *name) {
@@ -182,12 +186,18 @@ static char *sanitize_label(const char *s) {
   return buf;
 }
 
-static char *build_function_label(const ProgramFunction *func) {
-  if (!func) return strdup("func");
+static char *build_file_prefix(const ProgramFunction *func) {
+  if (!func) return strdup("file");
   const char *src = func->source_file ? func->source_file : "";
   const char *base = strrchr(src, '/');
   base = base ? base + 1 : src;
   char *base_clean = sanitize_label(base);
+  return base_clean;
+}
+
+static char *build_function_label(const ProgramFunction *func) {
+  if (!func) return strdup("func");
+  char *base_clean = build_file_prefix(func);
   char *name_clean = sanitize_label(func->name ? func->name : "func");
   char *label = dup_printf("%s_%s", base_clean, name_clean);
   free(base_clean);
@@ -329,6 +339,19 @@ static void emit_binary_assignment(CodeBlock *b, const FlowOperation *op, EmitCo
   free(comment);
 }
 
+static char *resolve_call_label(EmitContext *ctx, const char *name) {
+  if (!name) return strdup("<unknown>");
+  char *clean = sanitize_label(name);
+  char *result = NULL;
+  if (ctx && ctx->file_prefix) {
+    result = dup_printf("%s_%s", ctx->file_prefix, clean);
+  } else {
+    result = strdup(clean);
+  }
+  free(clean);
+  return result;
+}
+
 static void emit_flow_operation(CodeBlock *b, const FlowOperation *op, EmitContext *ctx) {
   if (!op) return;
   switch (op->kind) {
@@ -359,7 +382,9 @@ static void emit_flow_operation(CodeBlock *b, const FlowOperation *op, EmitConte
         emit_comment(b, arg_desc);
         emit_literal_load(b, arg_registers[idx], &op->call_args[i]);
       }
-      emit_instruction(b, "  call %s", op->call_name ? op->call_name : "<unknown>");
+      char *target = resolve_call_label(ctx, op->call_name);
+      emit_instruction(b, "  call %s", target);
+      free(target);
       break;
     }
     case FLOW_OP_RETURN:
@@ -465,6 +490,7 @@ void program_image_add_function_from_cfg(ProgramImage *img, const ProgramFunctio
   CodeBlock *block = program_image_add_block(img, func_label);
   EmitContext ctx;
   emit_context_init(&ctx);
+  ctx.file_prefix = build_file_prefix(func);
 
   int entry = find_entry_node(cfg);
   int *visited = calloc((size_t)cfg->n_nodes, sizeof(int));
@@ -534,7 +560,6 @@ void program_image_write_asm(const ProgramImage *img, FILE *out) {
     }
     fprintf(out, "\n");
   }
-  fprintf(out, ".text\n");
   for (int i=0;i<img->n_blocks;i++) {
     CodeBlock *b = &img->blocks[i];
     fprintf(out, "; function %s\n", b->name);
