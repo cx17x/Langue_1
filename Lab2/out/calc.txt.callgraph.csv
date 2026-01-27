@@ -1,3 +1,1 @@
 caller,callee,count
-main,print_int,1
-print_uint,print_uint,1

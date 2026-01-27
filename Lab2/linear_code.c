@@ -446,7 +446,7 @@ static void emit_branch(CodeBlock *b, const CFG *cfg, const char *const *labels,
   int next = find_next_in_order(order, node_id);
   if (node->succ.n == 1) {
     int target = node->succ.a[0];
-    if (target != next) emit_instruction(b, "  JMP %s", labels[target]);
+    if (target != next) emit_instruction(b, "  jmp %s", labels[target]);
     return;
   }
   int true_id = -1;
@@ -475,13 +475,15 @@ static void emit_branch(CodeBlock *b, const CFG *cfg, const char *const *labels,
     emit_instruction(b, "  cmp %s, %s", left_reg, right_reg);
     const char *false_instr = cond_false_instr(cond_op->cond_kind);
     if (false_id != -1) emit_instruction(b, "  %s %s", false_instr, labels[false_id]);
-    if (true_id != -1 && true_id != next) emit_instruction(b, "  JMP %s", labels[true_id]);
+    if (true_id != -1 && true_id != next) emit_instruction(b, "  jmp %s", labels[true_id]);
   } else {
-    emit_instruction(b, "  CMP R0, 0");
-    if (false_id != -1) emit_instruction(b, "  JZ %s", labels[false_id]);
-    if (true_id != -1 && true_id != next) emit_instruction(b, "  JMP %s", labels[true_id]);
+    const char *zero_reg = "r5";
+    emit_instruction(b, "  li %s, 0", zero_reg);
+    emit_instruction(b, "  cmp r0, %s", zero_reg);
+    if (false_id != -1) emit_instruction(b, "  jz %s", labels[false_id]);
+    if (true_id != -1 && true_id != next) emit_instruction(b, "  jmp %s", labels[true_id]);
   }
-}
+  }
 
 void program_image_add_function_from_cfg(ProgramImage *img, const ProgramFunction *func) {
   if (!img || !func || !func->cfg) return;

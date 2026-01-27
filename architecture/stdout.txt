@@ -1,2 +1,3 @@
-C:\RemoteTasks.Workspace\Sessions\AssembleDebug_8cb18833-ced9-454b-b46d-04372ecb5946\workdir\In\twoaddr_dyn64_v10.target.pdsl(154,1): Unexpected token ""; expected: }, regs, stack, import, subset, format, memory, mnemonic, registers, mnemonics, instructions
-Error: Architecture 'twoaddr_dyn64_v10' definition not collected.
+Architecture 'twoaddr_dyn64_v10' seems to be valid for now.
+C:\RemoteTasks.Workspace\Sessions\AssembleDebug_7100d01d-bc1a-41f8-b8d8-46cad81108d0\workdir\In\test_add.asm(26,2): Failed to resolve symbol 'calc_txt_print_int'
+Assembling failed.

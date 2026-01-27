@@ -2,63 +2,22 @@ digraph G {
   subgraph cluster_f0 {
     label="function main";
     file_calc_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
-    file_calc_txt_f0_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:value]\n  rhs: Nop(Literal) [const:0]\nAssign(=)\n  lhs: Nop(Identifier) [var:read_loop]\n  rhs: Expr(:=)\nExprStmt\n  expr: Nop(Identifier) [var:]"];
-    file_calc_txt_f0_n2 [shape=box,label="B2 (block)\nERROR"];
-    file_calc_txt_f0_n3 [shape=box,label="B3 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { BinaryOp(CompareExpr) { Nop(Identifier) [var:ch] | Expr(=) } | Nop(Literal) [const:'\\n'] }"];
-    file_calc_txt_f0_n4 [shape=box,label="B4 (block)\nExprStmt\n  expr: Call(print_int) { Nop(Identifier) [var:value] }\nExprStmt\n  expr: Nop(Identifier) [var:return]"];
-    file_calc_txt_f0_n5 [shape=box,label="B5 (if.else)\nempty"];
-    file_calc_txt_f0_n6 [shape=box,label="B6 (if.join)\njoin"];
-    file_calc_txt_f0_n7 [shape=box,label="B7 (block)\nExprStmt\n  expr: Nop(Identifier) [var:]\nExprStmt\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:digit] | BinaryOp(AddExpr) { BinaryOp(AddExpr) { BinaryOp(AddExpr) { Nop(Identifier) [var:ch] | Nop(Literal) [const:'0'] } | Expr(digit := ch) } | Nop(Literal) [const:'0'] } }\nExprStmt\n  expr: Nop(Identifier) [var:]"];
-    file_calc_txt_f0_n8 [shape=box,label="B8 (block)\nExprStmt\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:value] | BinaryOp(AddExpr) { BinaryOp(AddExpr) { BinaryOp(MulExpr) { Nop(Identifier) [var:value] | Nop(Literal) [const:10] } | BinaryOp(MulExpr) { BinaryOp(MulExpr) { Nop(Identifier) [var:digit] | Expr(value := value) } | Nop(Literal) [const:10] } } | Nop(Identifier) [var:digit] } }\nExprStmt\n  expr: Nop(Identifier) [var:goto]"];
+    file_calc_txt_f0_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Literal) [const:0]\nAssign(=)\n  lhs: Nop(Identifier) [var:b]\n  rhs: Nop(Literal) [const:1]\nAssign(=)\n  lhs: Nop(Identifier) [var:i]\n  rhs: Nop(Literal) [const:0]"];
+    file_calc_txt_f0_n2 [shape=box,label="B2 (block)\nAssign(=)\n  lhs: Nop(Identifier) [var:n]\n  rhs: Nop(Literal) [const:10]"];
+    file_calc_txt_f0_n3 [shape=box,label="B3 (block)\nERROR"];
+    file_calc_txt_f0_n4 [shape=box,label="B4 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:i] | Nop(Identifier) [var:n] }"];
+    file_calc_txt_f0_n5 [shape=box,label="B5 (block)\nExprStmt\n  expr: Call(print_int) { Nop(Identifier) [var:a] }\nAssign(=)\n  lhs: Nop(Identifier) [var:next]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:a] | Nop(Identifier) [var:b] }\nAssign(=)\n  lhs: Nop(Identifier) [var:a]\n  rhs: Nop(Identifier) [var:b]"];
+    file_calc_txt_f0_n6 [shape=box,label="B6 (block)\nAssign(=)\n  lhs: Nop(Identifier) [var:b]\n  rhs: Nop(Identifier) [var:next]\nAssign(=)\n  lhs: Nop(Identifier) [var:i]\n  rhs: BinaryOp(AddExpr) { Nop(Identifier) [var:i] | Nop(Literal) [const:1] }\nExprStmt\n  expr: Nop(Identifier) [var:goto]"];
+    file_calc_txt_f0_n7 [shape=box,label="B7 (if.else)\nempty"];
+    file_calc_txt_f0_n8 [shape=box,label="B8 (if.join)\njoin"];
     file_calc_txt_f0_n1 -> file_calc_txt_f0_n2;
     file_calc_txt_f0_n2 -> file_calc_txt_f0_n3;
-    file_calc_txt_f0_n3 -> file_calc_txt_f0_n4 [label="true"];
-    file_calc_txt_f0_n3 -> file_calc_txt_f0_n5 [label="false"];
-    file_calc_txt_f0_n4 -> file_calc_txt_f0_n6;
+    file_calc_txt_f0_n3 -> file_calc_txt_f0_n4;
+    file_calc_txt_f0_n4 -> file_calc_txt_f0_n5 [label="true"];
+    file_calc_txt_f0_n4 -> file_calc_txt_f0_n7 [label="false"];
     file_calc_txt_f0_n5 -> file_calc_txt_f0_n6;
-    file_calc_txt_f0_n6 -> file_calc_txt_f0_n7;
+    file_calc_txt_f0_n6 -> file_calc_txt_f0_n8;
     file_calc_txt_f0_n7 -> file_calc_txt_f0_n8;
     file_calc_txt_f0_n8 -> file_calc_txt_f0_n0;
-  }
-  subgraph cluster_f1 {
-    label="function print_int";
-    file_calc_txt_f1_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
-    file_calc_txt_f1_n1 [shape=box,label="B1 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:value]\n  rhs: Nop(Identifier) [var:n]"];
-    file_calc_txt_f1_n2 [shape=box,label="B2 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:value] | Nop(Literal) [const:0] }"];
-    file_calc_txt_f1_n3 [shape=box,label="B3 (block)\nExprStmt\n  expr: Call(send_byte) { Nop(Literal) [const:'-'] }\nAssign(=)\n  lhs: Nop(Identifier) [var:value]\n  rhs: BinaryOp(AddExpr) { Nop(Literal) [const:0] | Nop(Identifier) [var:value] }"];
-    file_calc_txt_f1_n4 [shape=box,label="B4 (if.else)\nempty"];
-    file_calc_txt_f1_n5 [shape=box,label="B5 (if.join)\njoin"];
-    file_calc_txt_f1_n6 [shape=box,label="B6 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { BinaryOp(CompareExpr) { Nop(Identifier) [var:value] | Expr(=) } | Nop(Literal) [const:0] }"];
-    file_calc_txt_f1_n7 [shape=box,label="B7 (block)\nExprStmt\n  expr: Call(send_byte) { Nop(Identifier) [var:value] }"];
-    file_calc_txt_f1_n8 [shape=box,label="B8 (if.else)\nempty"];
-    file_calc_txt_f1_n9 [shape=box,label="B9 (if.join)\njoin"];
-    file_calc_txt_f1_n10 [shape=box,label="B10 (block)\nExprStmt\n  expr: Call(send_byte) { Nop(Literal) [const:'\\n'] }"];
-    file_calc_txt_f1_n1 -> file_calc_txt_f1_n2;
-    file_calc_txt_f1_n2 -> file_calc_txt_f1_n3 [label="true"];
-    file_calc_txt_f1_n2 -> file_calc_txt_f1_n4 [label="false"];
-    file_calc_txt_f1_n3 -> file_calc_txt_f1_n5;
-    file_calc_txt_f1_n4 -> file_calc_txt_f1_n5;
-    file_calc_txt_f1_n5 -> file_calc_txt_f1_n6;
-    file_calc_txt_f1_n6 -> file_calc_txt_f1_n7 [label="true"];
-    file_calc_txt_f1_n6 -> file_calc_txt_f1_n8 [label="false"];
-    file_calc_txt_f1_n7 -> file_calc_txt_f1_n9;
-    file_calc_txt_f1_n8 -> file_calc_txt_f1_n9;
-    file_calc_txt_f1_n9 -> file_calc_txt_f1_n10;
-    file_calc_txt_f1_n10 -> file_calc_txt_f1_n0;
-  }
-  subgraph cluster_f2 {
-    label="function print_uint";
-    file_calc_txt_f2_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
-    file_calc_txt_f2_n1 [shape=box,label="B1 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:n] | Nop(Literal) [const:10] }"];
-    file_calc_txt_f2_n2 [shape=box,label="B2 (block)\nExprStmt\n  expr: Call(print_uint) { BinaryOp(MulExpr) { Nop(Identifier) [var:n] | Nop(Literal) [const:10] } }"];
-    file_calc_txt_f2_n3 [shape=box,label="B3 (if.else)\nempty"];
-    file_calc_txt_f2_n4 [shape=box,label="B4 (if.join)\njoin"];
-    file_calc_txt_f2_n5 [shape=box,label="B5 (entry)\nAssign(=)\n  lhs: Nop(Identifier) [var:digit]\n  rhs: BinaryOp(MulExpr) { Nop(Identifier) [var:n] | Nop(Literal) [const:10] }\nExprStmt\n  expr: Call(send_byte) { BinaryOp(AddExpr) { Nop(Literal) [const:'0'] | Nop(Identifier) [var:digit] } }"];
-    file_calc_txt_f2_n1 -> file_calc_txt_f2_n2 [label="true"];
-    file_calc_txt_f2_n1 -> file_calc_txt_f2_n3 [label="false"];
-    file_calc_txt_f2_n2 -> file_calc_txt_f2_n4;
-    file_calc_txt_f2_n3 -> file_calc_txt_f2_n4;
-    file_calc_txt_f2_n4 -> file_calc_txt_f2_n5;
-    file_calc_txt_f2_n5 -> file_calc_txt_f2_n0;
   }
 }

@@ -234,15 +234,13 @@ instructions:
     // ret : restore old bp, return ip, drop frame
     instruction ret = { 0001 0100, 0000 0000 0000 0000 0000 0000 } {
         if status != 0 then ip = ip; else {
-            // stack[bp]   = old_bp (TAG_INT)
-            // stack[bp+8] = return_ip (TAG_INT)
-            t0 = stackMem:8[bp];
-            t1 = stackMem:8[(bp + 8) & 0xffff];
+            t0 = stackMem:8[bp];                  // old_bp
+            t1 = stackMem:8[(bp + 8) & 0xffff];   // return_ip
+
+            sp = (bp + 16) & 0xffff;              // drop frame
 
             bp = (t0 & 0x00ffffffffffffff) & 0xffff;
             ip = (t1 & 0x00ffffffffffffff) & 0xffff;
-
-            sp = (bp + 16) & 0xffff;
         }
     };
 

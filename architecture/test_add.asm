@@ -1,48 +1,47 @@
 [section code, code]
-
 start:
   ldsp 0xfff0
   ldbp 0xfff0
-
-  ; пример: считаем число и печатаем его outd
-  call read_pos_int
-  outd r0
+  call calc_txt_main
   hlt
-
-
-; ----------------------------------------
-; read_pos_int()
-; Reads decimal digits until '\n'
-; Returns: r0 = value (TAG_INT)
-; Clobbers: r1..r5
-; ----------------------------------------
-read_pos_int:
-  ; value = 0
+; function calc_txt_main
+calc_txt_main:
   li r0, 0
-  li r5, 10          ; const '\n' = 10 (будем переиспользовать)
-  li r4, 10          ; const 10 для умножения
-
-; ждать первую цифру (пропускаем пустые строки)
-rpi_wait_first:
-  inb r1             ; r1 = ch
-  cmp r1, r5         ; ch == '\n' ?
-  jz  rpi_wait_first ; пустая строка -> ждём дальше
-
-; основной цикл: пока не '\n'
-rpi_loop:
-  ; digit = ch - '0'
-  li  r2, 48         ; '0'
-  sub r1, r2         ; r1 = digit (0..9) как TAG_INT
-
-  ; value = value*10 + digit
-  mov r3, r0
-  mul r3, r4         ; r3 = value*10
-  add r3, r1         ; r3 = value*10 + digit
-  mov r0, r3         ; value = r3
-
-  ; читать следующий символ
-  inb r1
-  cmp r1, r5         ; '\n' ?
-  jnz rpi_loop
-
+; store -> a
+  li r1, 1
+; store -> b
+  li r2, 0
+; store -> i
+calc_txt_main_B2:
+  li r3, 10
+; store -> n
+calc_txt_main_B3:
+; ERROR
+calc_txt_main_B4:
+; op
+  li r5, 0
+  cmp r0, r5
+  jz calc_txt_main_B7
+calc_txt_main_B5:
+; CALL print_int
+; Nop(Identifier) [var:a]
+; Nop(Identifier) [var:a]
+  call calc_txt_print_int
+  add r0, r1
+; store -> next
+; Nop(Identifier) [var:b]
+; store -> a
+calc_txt_main_B6:
+; Nop(Identifier) [var:next]
+; store -> b
+  li r5, 1
+  add r2, r5
+; store -> i
+; Nop(Identifier) [var:goto]
+calc_txt_main_B8:
+; join
+calc_txt_main_B7:
+; empty
+  jmp calc_txt_main_B8
+calc_txt_main_end:
   ret
