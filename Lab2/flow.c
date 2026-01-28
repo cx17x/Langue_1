@@ -75,6 +75,7 @@ static BinaryKind deduce_binary_kind(const char *line) {
   if (strstr(line, "SubExpr")) return BIN_SUB;
   if (strstr(line, "MulExpr")) return BIN_MUL;
   if (strstr(line, "DivExpr")) return BIN_DIV;
+  fprintf(stderr, "[FLOW] deduce_binary_kind got line=%s -> UNKNOWN\n", line);
   return BIN_UNKNOWN;
 }
 
@@ -94,6 +95,8 @@ static void parse_binary_operands(FlowOperation *op, const char *line) {
   if (!sep) return;
   char *left = strndup_trim(start + 1, (size_t)(sep - start - 1));
   char *right = strndup_trim(sep + 1, (size_t)(end - sep - 1));
+  fprintf(stderr, "[FLOW] parse_binary_operands left=%s right=%s\n",
+          left ? left : "<null>", right ? right : "<null>");
   if (left && *left) op->bin_left = expr_info_make(left);
   if (right && *right) op->bin_right = expr_info_make(right);
   free(left);
@@ -260,6 +263,7 @@ static FlowOperation *flow_operation_from_line(const char *line) {
       free(type);
     }
   } else if (strstr(line, "Assign(")) {
+    fprintf(stderr, "[FLOW] Assign line: %s\n", line);
     op->kind = FLOW_OP_ASSIGN;
     char *lhs = extract_field(line, "lhs:");
     char *rhs = extract_field(line, "rhs:");
@@ -275,6 +279,7 @@ static FlowOperation *flow_operation_from_line(const char *line) {
     }
     if (op->rhs.text && strstr(op->rhs.text, "BinaryOp(")) {
       op->bin_kind = deduce_binary_kind(op->rhs.text);
+      fprintf(stderr, "[FLOW] deduced bin_kind=%d for rhs=%s\n", op->bin_kind, op->rhs.text ? op->rhs.text : "<null>");
       if (op->bin_kind != BIN_UNKNOWN) parse_binary_operands(op, op->rhs.text);
     }
   } else if (strstr(line, "ExprStmt")) {

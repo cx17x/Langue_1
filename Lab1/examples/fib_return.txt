@@ -1,0 +1,17 @@
+method fib(n: int): int;
+begin
+    if n <= 1 then
+        return n;
+    return fib(n - 1) + fib(n - 2);
+end;
+
+method main()
+var i: int;
+begin
+    i := 0;
+    while i < 6 do begin
+        print_int(fib(i));
+        println();
+        i := i + 1;
+    end;
+end;

@@ -1,24 +1,50 @@
-method main()
-var a: int;
-    b: int;
-    next: int;
-    i: int;
-    n: int;
-begin
-    a := 0;
-    b := 1;
-    i := 0;
-    n := 10;
+[section code, code]
 
-loop:
-    if i < n then begin
-        print_int(a);
+start:
+  ldsp 0xfff0
+  ldbp 0xfff0
 
-        next := a + b;
-        a := b;
-        b := next;
+  li  r0, 10
 
-        i := i + 1;
-        goto loop;
-    end;
-end;
+  call fib
+  outd r0
+  hlt
+
+
+fib:
+  ; if n == 0 return n
+  li  r1, 0
+  cmp r0, r1
+  je  fib_ret
+
+  ; if n == 1 return n
+  li  r1, 1
+  cmp r0, r1
+  je  fib_ret
+
+  ; save n
+  push r0
+
+  ; fib(n-1)
+  li  r1, 1
+  sub r0, r1
+  call fib
+  mov  r2, r0
+
+  ; restore n
+  pop  r0
+
+  ; preserve fib(n-1)
+  push r2
+
+  ; fib(n-2)
+  li  r1, 2
+  sub r0, r1
+  call fib
+
+  pop  r2
+  add  r0, r2
+
+fib_ret:
+  outd r0
+  ret

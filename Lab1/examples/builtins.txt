@@ -1,0 +1,9 @@
+method builtins()
+var dummy: int;
+begin
+    print_char('A');
+    println();
+    read_char();
+    print_int(42);
+    print_char('B');
+end;

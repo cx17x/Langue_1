@@ -1,0 +1,17 @@
+method fib(n: int): int
+var
+    r: int;
+begin
+    if n < 3 then
+        r :=  1;
+    else
+        r := fib(n - 1) + fib(n - 2);
+    return r;
+end;
+
+method main()
+var i: int;
+begin
+    print_int(fib(12));
+
+end;

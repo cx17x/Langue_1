@@ -54,6 +54,7 @@ module.exports = grammar({
       $.while_statement,
       $.do_statement,
       $.break_statement,
+      $.return_statement,
       $.assignment,
       $.expr_stmt
     ),
@@ -69,6 +70,8 @@ module.exports = grammar({
     break_statement: $ => seq('break', ';'),
 
     expr_stmt: $ => seq($.expr, ';'),
+
+    return_statement: $ => seq('return', optional($.expr), ';'),
 
     // ---- Expressions with precedence ----
     expr: $ => $._expr,

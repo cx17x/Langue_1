@@ -1,0 +1,24 @@
+digraph G {
+  subgraph cluster_f0 {
+    label="function main";
+    file_fib_recur_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_fib_recur_txt_f0_n1 [shape=box,label="B1 (entry)\nExprStmt\n  expr: Call(print_int) { Call(fib) { ... } }"];
+    file_fib_recur_txt_f0_n1 -> file_fib_recur_txt_f0_n0;
+  }
+  subgraph cluster_f1 {
+    label="function fib";
+    file_fib_recur_txt_f1_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
+    file_fib_recur_txt_f1_n1 [shape=box,label="B1 (if.cond)\nIfCond\n  expr: BinaryOp(CompareExpr) { Nop(Identifier) [var:n] | Nop(Literal) [const:3] }"];
+    file_fib_recur_txt_f1_n2 [shape=box,label="B2 (block)\nAssign(=)\n  lhs: Nop(Identifier) [var:r]\n  rhs: Nop(Literal) [const:1]"];
+    file_fib_recur_txt_f1_n3 [shape=box,label="B3 (block)\nAssign(=)\n  lhs: Nop(Identifier) [var:r]\n  rhs: BinaryOp(AddExpr) { Call(fib) { BinaryOp(AddExpr) { ... | ... } } | Call(fib) { BinaryOp(AddExpr) { ... | ... } } }"];
+    file_fib_recur_txt_f1_n4 [shape=box,label="B4 (if.join)\njoin"];
+    file_fib_recur_txt_f1_n5 [shape=box,label="B5 (block)\nReturn\n  value: Nop(Identifier) [var:r]"];
+    file_fib_recur_txt_f1_n1 -> file_fib_recur_txt_f1_n2 [label="true"];
+    file_fib_recur_txt_f1_n1 -> file_fib_recur_txt_f1_n3 [label="false"];
+    file_fib_recur_txt_f1_n1 -> file_fib_recur_txt_f1_n0;
+    file_fib_recur_txt_f1_n2 -> file_fib_recur_txt_f1_n4;
+    file_fib_recur_txt_f1_n3 -> file_fib_recur_txt_f1_n4;
+    file_fib_recur_txt_f1_n4 -> file_fib_recur_txt_f1_n5;
+    file_fib_recur_txt_f1_n5 -> file_fib_recur_txt_f1_n0;
+  }
+}

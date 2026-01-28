@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 static void intlist_push(IntList *l, int v) {
   if (l->n + 1 > l->cap) {
@@ -318,9 +319,283 @@ static const char *resolve_expr_reg(CodeBlock *b, EmitContext *ctx, const ExprIn
   return target;
 }
 
+static char *resolve_call_label(EmitContext *ctx, const char *name);
+
+static void canonicalize_call_name(const char *src, char *dst, size_t dst_len) {
+  if (!dst || dst_len == 0) return;
+  dst[0] = '\0';
+  if (!src) return;
+  size_t pos = 0;
+  for (const char *p = src; *p && pos + 1 < dst_len; ++p) {
+    unsigned char ch = (unsigned char)*p;
+    if (isalnum(ch)) dst[pos++] = (char)tolower(ch);
+  }
+  dst[pos] = '\0';
+}
+
+static int call_name_is(const char *name, const char *target) {
+  if (!name || !target) return 0;
+  char canon_name[32];
+  char canon_target[32];
+  canonicalize_call_name(name, canon_name, sizeof(canon_name));
+  canonicalize_call_name(target, canon_target, sizeof(canon_target));
+  if (!canon_name[0] || !canon_target[0]) return 0;
+  return strcmp(canon_name, canon_target) == 0;
+}
+
+static void ensure_value_in_r0(CodeBlock *b, EmitContext *ctx, const ExprInfo *arg) {
+  if (!b || !arg) return;
+  const char *reg = resolve_expr_reg(b, ctx, arg, "r0");
+  if (!reg) return;
+  if (strcmp(reg, "r0") != 0) emit_instruction(b, "  mov r0, %s", reg);
+}
+
+static int emit_builtin_call(CodeBlock *b, const FlowOperation *op, EmitContext *ctx) {
+  if (!b || !op || !op->call_name) return 0;
+  if (call_name_is(op->call_name, "print_int")) {
+    if (op->n_call_args > 0) ensure_value_in_r0(b, ctx, &op->call_args[0]);
+    emit_instruction(b, "  outd r0");
+    return 1;
+  }
+  if (call_name_is(op->call_name, "print_char")) {
+    if (op->n_call_args > 0) ensure_value_in_r0(b, ctx, &op->call_args[0]);
+    emit_instruction(b, "  outb r0");
+    return 1;
+  }
+  if (call_name_is(op->call_name, "println")) {
+    emit_instruction(b, "  li r0, 10");
+    emit_instruction(b, "  outb r0");
+    return 1;
+  }
+  if (call_name_is(op->call_name, "read_char")) {
+    emit_instruction(b, "  inb r0");
+    return 1;
+  }
+  return 0;
+}
+
+static char *trim_copy(const char *start, const char *end) {
+  if (!start) return NULL;
+  const char *s = start;
+  const char *e = end ? end : start + strlen(start);
+  while (s < e && isspace((unsigned char)*s)) s++;
+  while (e > s && isspace((unsigned char)*(e - 1))) e--;
+  size_t len = (size_t)(e - s);
+  char *res = malloc(len + 1);
+  if (!res) return NULL;
+  memcpy(res, s, len);
+  res[len] = '\0';
+  return res;
+}
+
+static const char *find_matching(const char *start, char open, char close) {
+  if (!start || *start != open) return NULL;
+  int depth = 1;
+  const char *p = start + 1;
+  while (*p) {
+    if (*p == open) depth++;
+    else if (*p == close) {
+      depth--;
+      if (depth == 0) return p;
+    }
+    p++;
+  }
+  return NULL;
+}
+
+static char **split_top_level_parts(const char *start, const char *end, char sep, int *out_count) {
+  if (!start || !end || start >= end) { *out_count = 0; return NULL; }
+  char **parts = NULL;
+  int cap = 0;
+  int count = 0;
+  const char *segment_start = start;
+  int depth = 0;
+  for (const char *p = start; p <= end; ++p) {
+    char ch = (p == end) ? sep : *p;
+    if (p < end) {
+      if (ch == '{') depth++;
+      else if (ch == '}') {
+        if (depth > 0) depth--;
+      }
+    }
+    if ((p == end && segment_start < p) || (ch == sep && depth == 0)) {
+      char *part = trim_copy(segment_start, p);
+      if (count + 1 > cap) {
+        cap = (cap == 0) ? 4 : cap * 2;
+        parts = realloc(parts, sizeof(char *) * cap);
+      }
+      parts[count++] = part ? part : strdup("");
+      segment_start = p + 1;
+      while (segment_start < end && isspace((unsigned char)*segment_start)) segment_start++;
+    }
+  }
+  *out_count = count;
+  return parts;
+}
+
+static void free_parts(char **parts, int count) {
+  if (!parts) return;
+  for (int i = 0; i < count; i++) free(parts[i]);
+  free(parts);
+}
+
+static const char *binary_op_name_to_instr(const char *name) {
+  if (!name) return NULL;
+  if (strcmp(name, "AddExpr") == 0) return "add";
+  if (strcmp(name, "SubExpr") == 0) return "sub";
+  if (strcmp(name, "MulExpr") == 0) return "mul";
+  if (strcmp(name, "DivExpr") == 0) return "div";
+  return NULL;
+}
+
+static void emit_expr_value(CodeBlock *b, EmitContext *ctx, const char *text, const char *target);
+
+static void emit_call_expr(CodeBlock *b, EmitContext *ctx, const char *text, const char *target) {
+  if (!b || !text || !target) return;
+  const char *call_pos = strstr(text, "Call(");
+  if (!call_pos) return;
+  const char *name_start = call_pos + 5;
+  const char *name_end = strchr(name_start, ')');
+  if (!name_end) return;
+  char *name = trim_copy(name_start, name_end);
+  const char *brace = strchr(name_end, '{');
+  char *args_body = NULL;
+  char **args = NULL;
+  int arg_count = 0;
+  if (brace) {
+    const char *brace_end = find_matching(brace, '{', '}');
+    if (brace_end) args_body = trim_copy(brace + 1, brace_end);
+  }
+  if (args_body && *args_body) args = split_top_level_parts(args_body, args_body + strlen(args_body), '|', &arg_count);
+  for (int i = 0; i < arg_count && i < arg_register_count; i++) {
+    const char *arg_target = arg_registers[i];
+    emit_expr_value(b, ctx, args[i], arg_target);
+  }
+  char *label = resolve_call_label(ctx, name);
+  emit_instruction(b, "  call %s", label);
+  if (strcmp(target, "r0") != 0) emit_instruction(b, "  mov %s, r0", target);
+  free(label);
+  free(name);
+  free_parts(args, arg_count);
+  free(args_body);
+}
+
+static void emit_binary_expr(CodeBlock *b, EmitContext *ctx, const char *text, const char *target) {
+  if (!b || !ctx || !text || !target) return;
+  const char *paren = strchr(text, '(');
+  const char *paren_end = paren ? strchr(paren, ')') : NULL;
+  char *op_name = paren && paren_end ? trim_copy(paren + 1, paren_end) : NULL;
+  const char *brace = paren_end ? strchr(paren_end, '{') : NULL;
+  if (!brace) { free(op_name); return; }
+  const char *brace_end = find_matching(brace, '{', '}');
+  if (!brace_end) { free(op_name); return; }
+  char *body = trim_copy(brace + 1, brace_end);
+  if (!body) { free(op_name); return; }
+  int count = 0;
+  char **parts = split_top_level_parts(body, body + strlen(body), '|', &count);
+  if (count >= 2) {
+    emit_expr_value(b, ctx, parts[0], target);
+    emit_expr_value(b, ctx, parts[1], scratch_reg);
+    const char *instr = binary_op_name_to_instr(op_name);
+    if (instr) emit_instruction(b, "  %s %s, %s", instr, target, scratch_reg);
+    else emit_comment(b, text);
+  } else {
+    emit_comment(b, text);
+  }
+  free_parts(parts, count);
+  free(body);
+  free(op_name);
+}
+
+static void emit_expr_value(CodeBlock *b, EmitContext *ctx, const char *text, const char *target) {
+  if (!b || !target) return;
+  if (!text || !*text) return;
+  char *trimmed = trim_copy(text, NULL);
+  if (!trimmed || !*trimmed) { free(trimmed); return; }
+  if (strstr(trimmed, "Nop(Identifier)") && strstr(trimmed, "[var:")) {
+    const char *start = strstr(trimmed, "[var:");
+    const char *end = start ? strchr(start, ']') : NULL;
+    if (start && end) {
+      start += 5;
+      char *name = trim_copy(start, end);
+      if (name) {
+        const char *reg = ensure_var_reg(ctx, name);
+        if (reg && strcmp(reg, target) != 0) emit_instruction(b, "  mov %s, %s", target, reg);
+        free(name);
+        free(trimmed);
+        return;
+      }
+    }
+  }
+  if (strstr(trimmed, "Nop(Literal)") && strstr(trimmed, "[const:")) {
+    const char *start = strstr(trimmed, "[const:");
+    const char *end = start ? strchr(start, ']') : NULL;
+    if (start) {
+      start += 7;
+      const char *limit = end ? end : trimmed + strlen(trimmed);
+      char *lit = trim_copy(start, limit);
+      if (lit) {
+        long long value = 0;
+        if (literal_to_value(lit, &value)) {
+          emit_instruction(b, "  li %s, %lld", target, value);
+          free(lit);
+          free(trimmed);
+          return;
+        }
+        free(lit);
+      }
+    }
+  }
+  if (strstr(trimmed, "Call(")) {
+    emit_call_expr(b, ctx, trimmed, target);
+    free(trimmed);
+    return;
+  }
+  if (strstr(trimmed, "BinaryOp(")) {
+    emit_binary_expr(b, ctx, trimmed, target);
+    free(trimmed);
+    return;
+  }
+  emit_comment(b, trimmed);
+  free(trimmed);
+}
+
+static const char *binary_kind_instr(BinaryKind kind) {
+  switch (kind) {
+    case BIN_ADD: return "add";
+    case BIN_SUB: return "sub";
+    case BIN_MUL: return "mul";
+    case BIN_DIV: return "div";
+    default: return NULL;
+  }
+}
+
 static void emit_binary_assignment(CodeBlock *b, const FlowOperation *op, EmitContext *ctx) {
   if (!op || !op->lhs.identifier) return;
+  fprintf(stderr, "[DEBUG] emit_binary_assignment lhs=%s bin_kind=%d bin_left=%s bin_right=%s\n",
+          op->lhs.identifier,
+          op->bin_kind,
+          op->bin_left.text ? op->bin_left.text : "<null>",
+          op->bin_right.text ? op->bin_right.text : "<null>");
+  fprintf(stderr, "[DEBUG] op->rhs.text=%s\n",
+          op->rhs.text ? op->rhs.text : "<null>");
   const char *dest = ensure_var_reg(ctx, op->lhs.identifier);
+  if (!dest) dest = scratch_reg;
+  if (op->bin_kind != BIN_UNKNOWN) {
+    fprintf(stderr, "[DEBUG] bin_kind=%d\n", op->bin_kind);
+    fprintf(stderr, "[DEBUG] bin_left.text=%s\n", op->bin_left.text ? op->bin_left.text : "<null>");
+    fprintf(stderr, "[DEBUG] bin_right.text=%s\n", op->bin_right.text ? op->bin_right.text : "<null>");
+  }
+  if (op->bin_kind != BIN_UNKNOWN && op->bin_left.text && op->bin_right.text) {
+    emit_expr_value(b, ctx, op->bin_left.text, dest);
+    emit_expr_value(b, ctx, op->bin_right.text, scratch_reg);
+    const char *instr = binary_kind_instr(op->bin_kind);
+    if (instr) emit_instruction(b, "  %s %s, %s", instr, dest, scratch_reg);
+    char *comment = dup_printf("store -> %s", op->lhs.identifier);
+    emit_comment(b, comment);
+    free(comment);
+    return;
+  }
   const char *lhs_reg = resolve_expr_reg(b, ctx, &op->bin_left, dest);
   const char *rhs_reg = resolve_expr_reg(b, ctx, &op->bin_right, scratch_reg);
   if (!lhs_reg) lhs_reg = dest;
@@ -354,6 +629,10 @@ static char *resolve_call_label(EmitContext *ctx, const char *name) {
 
 static void emit_flow_operation(CodeBlock *b, const FlowOperation *op, EmitContext *ctx) {
   if (!op) return;
+  fprintf(stderr, "[FLOW_EMIT] kind=%d lhs=%s bin_kind=%d\n",
+          op->kind,
+          op->lhs.identifier ? op->lhs.identifier : "<null>",
+          op->bin_kind);
   switch (op->kind) {
     case FLOW_OP_ASSIGN:
       if (op->bin_kind != BIN_UNKNOWN) {
@@ -376,6 +655,7 @@ static void emit_flow_operation(CodeBlock *b, const FlowOperation *op, EmitConte
       char *label = dup_printf("CALL %s", op->call_name ? op->call_name : "<unknown>");
       emit_comment(b, label);
       free(label);
+      if (emit_builtin_call(b, op, ctx)) break;
       int idx = 0;
       for (int i=0;i<op->n_call_args && idx < arg_register_count; i++, idx++) {
         const char *arg_desc = op->call_args[i].text ? op->call_args[i].text : "arg";
