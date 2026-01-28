@@ -1,6 +1,0 @@
-digraph CallGraph {
-  "main";
-  "fib";
-  "main" -> "fib" [label="1"];
-  "fib" -> "fib" [label="2"];
-}

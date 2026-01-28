@@ -1,8 +1,0 @@
-digraph G {
-  subgraph cluster_f0 {
-    label="function fib";
-    file_echo_txt_f0_n0 [shape=box,label="B0 (exit)\nNop(exit)"];
-    file_echo_txt_f0_n1 [shape=box,label="B1 (entry)\nempty"];
-    file_echo_txt_f0_n1 -> file_echo_txt_f0_n0;
-  }
-}

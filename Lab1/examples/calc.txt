@@ -1,24 +1,39 @@
+method readInt(): int;
+method writeInt(x: int);
+method writeChar(c: char);
+
 method main()
-var a: int;
-    b: int;
-    next: int;
-    i: int;
-    n: int;
+var op, a, b, res: int;
 begin
-    a := 0;
-    b := 1;
-    i := 0;
-    n := 10;
+    // читаем код операции: 0 = выход
+    op := readInt();
 
-loop:
-    if i < n then begin
-        print_int(a);
+    while op != 0 do
+    begin
+        a := readInt();
+        b := readInt();
+        res := 0;
 
-        next := a + b;
-        a := b;
-        b := next;
+        if op == 1 then
+            res := a + b;
+        else
+            if op == 2 then
+                res := a - b;
+        else
+            if op == 3 then
+                res := a * b;
+        else
+            if op == 4 then
+                res := a / b;
+        else
+            if op == 5 then
+                res := a % b;
+            else
+                res := 0;
 
-        i := i + 1;
-        goto loop;
+        writeInt(res);
+        writeChar('\\n');
+
+        op := readInt();
     end;
 end;
